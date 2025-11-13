@@ -791,8 +791,8 @@ var (
 	helpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	statusStyle       = lipgloss.NewStyle().Foreground(primaryColor)
 	selectedItemStyle = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
-	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(primaryColor).Padding(0, 2).Border(lipgloss.RoundedBorder(), false, false, true, false).BorderForeground(primaryColor)
-	inactiveTabStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Padding(0, 2)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(0, 3).MarginRight(1)
+	inactiveTabStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Padding(0, 3).MarginRight(1)
 )
 
 func (m *Model) renderTabHeader() string {
