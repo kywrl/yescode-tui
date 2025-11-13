@@ -393,11 +393,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		} else if m.currentTab == tabBalancePreference {
 			m.syncBalancePreferenceIdx()
 		}
-	case "left":
+	case "left", "h":
 		if m.currentTab == tabProviders {
 			m.focus = focusProviders
 		}
-	case "right":
+	case "right", "l":
 		if m.currentTab == tabProviders {
 			m.focus = focusAlternatives
 		}
@@ -800,26 +800,32 @@ func (m *Model) renderTabHeader() string {
 
 	// Tab 1: 个人资料
 	if m.currentTab == tabProfile {
-		tabs = append(tabs, activeTabStyle.Render("个人资料"))
+		tabs = append(tabs, activeTabStyle.Render("1 个人资料"))
 	} else {
-		tabs = append(tabs, inactiveTabStyle.Render("个人资料"))
+		tabs = append(tabs, inactiveTabStyle.Render("1 个人资料"))
 	}
 
 	// Tab 2: 提供商
 	if m.currentTab == tabProviders {
-		tabs = append(tabs, activeTabStyle.Render("提供商"))
+		tabs = append(tabs, activeTabStyle.Render("2 提供商"))
 	} else {
-		tabs = append(tabs, inactiveTabStyle.Render("提供商"))
+		tabs = append(tabs, inactiveTabStyle.Render("2 提供商"))
 	}
 
 	// Tab 3: 余额使用偏好
 	if m.currentTab == tabBalancePreference {
-		tabs = append(tabs, activeTabStyle.Render("余额使用偏好"))
+		tabs = append(tabs, activeTabStyle.Render("3 余额使用偏好"))
 	} else {
-		tabs = append(tabs, inactiveTabStyle.Render("余额使用偏好"))
+		tabs = append(tabs, inactiveTabStyle.Render("3 余额使用偏好"))
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+	tabsRow := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+
+	// 添加切换引导提示
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Italic(true)
+	hint := hintStyle.Render("  (按数字键 1-3 或 Tab 切换标签页)")
+
+	return tabsRow + hint
 }
 
 func (m *Model) renderProfileTab() string {
