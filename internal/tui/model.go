@@ -345,13 +345,7 @@ func (m *Model) View() string {
 		Width(m.width).
 		Align(lipgloss.Center)
 
-	subtitleStyle := lipgloss.NewStyle().
-		Foreground(mutedColor).
-		Width(m.width).
-		Align(lipgloss.Center)
-
 	sections = append(sections, titleStyle.Render("YesCode"))
-	sections = append(sections, subtitleStyle.Render("AI Model Provider Management"))
 	sections = append(sections, "")
 
 	sections = append(sections, m.help.View(m.keys))
