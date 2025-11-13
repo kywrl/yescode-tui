@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -21,6 +23,14 @@ const (
 	focusAlternatives
 )
 
+type tabIndex int
+
+const (
+	tabProfile tabIndex = iota
+	tabProviders
+	tabBalancePreference
+)
+
 // Model wires Bubble Tea with the YesCode API client.
 type Model struct {
 	client *api.Client
@@ -29,7 +39,9 @@ type Model struct {
 	providers           []api.ProviderBucket
 	providerIdx         int
 	altIdx              int
+	balancePreferenceIdx int
 	focus               focusArea
+	currentTab          tabIndex
 	ready               bool
 	status              string
 	err                 error
@@ -40,6 +52,9 @@ type Model struct {
 	spinner             spinner.Model
 	help                help.Model
 	keys                keyMap
+	profileViewport     viewport.Model
+	providersLoaded     bool
+	loadingProviders    bool
 }
 
 type providerState struct {
@@ -55,24 +70,28 @@ type providerState struct {
 
 // keyMap defines key bindings for the app
 type keyMap struct {
-	Up        key.Binding
-	Down      key.Binding
-	Left      key.Binding
-	Right     key.Binding
-	Enter     key.Binding
-	Refresh   key.Binding
-	Balance   key.Binding
-	Quit      key.Binding
+	Up      key.Binding
+	Down    key.Binding
+	Left    key.Binding
+	Right   key.Binding
+	Tab     key.Binding
+	Enter   key.Binding
+	Refresh key.Binding
+	Tab1    key.Binding
+	Tab2    key.Binding
+	Tab3    key.Binding
+	Quit    key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Up, k.Down, k.Left, k.Right, k.Enter, k.Refresh, k.Balance, k.Quit}
+	return []key.Binding{k.Tab, k.Up, k.Down, k.Left, k.Right, k.Enter, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
+		{k.Tab, k.Tab1, k.Tab2, k.Tab3},
 		{k.Up, k.Down, k.Left, k.Right},
-		{k.Enter, k.Refresh, k.Balance, k.Quit},
+		{k.Enter, k.Refresh, k.Quit},
 	}
 }
 
@@ -86,12 +105,16 @@ var keys = keyMap{
 		key.WithHelp("↓/j", "下移"),
 	),
 	Left: key.NewBinding(
-		key.WithKeys("left", "h", "tab"),
-		key.WithHelp("←/h/tab", "切换焦点"),
+		key.WithKeys("left", "h"),
+		key.WithHelp("←/h", "切换焦点"),
 	),
 	Right: key.NewBinding(
-		key.WithKeys("right", "l", "tab"),
-		key.WithHelp("→/l/tab", "切换焦点"),
+		key.WithKeys("right", "l"),
+		key.WithHelp("→/l", "切换焦点"),
+	),
+	Tab: key.NewBinding(
+		key.WithKeys("tab"),
+		key.WithHelp("tab", "切换标签页"),
 	),
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
@@ -101,13 +124,21 @@ var keys = keyMap{
 		key.WithKeys("r"),
 		key.WithHelp("r", "刷新"),
 	),
-	Balance: key.NewBinding(
-		key.WithKeys("b"),
-		key.WithHelp("b", "切换余额偏好"),
+	Tab1: key.NewBinding(
+		key.WithKeys("1"),
+		key.WithHelp("1", "个人资料"),
+	),
+	Tab2: key.NewBinding(
+		key.WithKeys("2"),
+		key.WithHelp("2", "提供商"),
+	),
+	Tab3: key.NewBinding(
+		key.WithKeys("3"),
+		key.WithHelp("3", "余额使用偏好"),
 	),
 	Quit: key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
-		key.WithHelp("q", "退出"),
+		key.WithKeys("q", "esc", "ctrl+c"),
+		key.WithHelp("q/esc", "退出"),
 	),
 }
 
@@ -152,6 +183,9 @@ type errMsg struct {
 	err error
 }
 
+type clearStatusMsg struct{}
+
+
 // NewModel constructs the root Bubble Tea model.
 func NewModel(client *api.Client) *Model {
 	// 创建 spinner
@@ -166,13 +200,18 @@ func NewModel(client *api.Client) *Model {
 	h.Styles.FullKey = lipgloss.NewStyle().Foreground(primaryColor)
 	h.Styles.FullDesc = helpStyle
 
+	// 创建 viewport
+	vp := viewport.New(0, 20)
+
 	return &Model{
-		client:       client,
-		focus:        focusProviders,
-		providerData: make(map[int]*providerState),
-		spinner:      s,
-		help:         h,
-		keys:         keys,
+		client:           client,
+		focus:            focusProviders,
+		providerData:     make(map[int]*providerState),
+		spinner:          s,
+		help:             h,
+		keys:             keys,
+		profileViewport:  vp,
+		status:           "加载个人资料中...",
 	}
 }
 
@@ -180,7 +219,6 @@ func NewModel(client *api.Client) *Model {
 func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		loadProfileCmd(m.client),
-		loadProvidersCmd(m.client),
 		m.spinner.Tick,
 	)
 }
@@ -203,14 +241,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.profile = msg.profile
 		m.status = fmt.Sprintf("欢迎 %s", msg.profile.Username)
 		m.updateReady()
+		cmds = append(cmds, clearStatusAfterDelay(3))
 	case providersLoadedMsg:
 		m.providers = msg.response.Providers
+		m.providersLoaded = true
+		m.loadingProviders = false
 		if m.providerIdx >= len(m.providers) {
 			m.providerIdx = 0
 		}
+		// 立即清除加载状态消息
+		if strings.Contains(m.status, "加载提供商列表中") {
+			m.status = ""
+		}
 		if len(m.providers) > 0 {
 			cmds = append(cmds, m.queueProviderDetailLoad(m.currentProviderID()))
-			m.status = fmt.Sprintf("已加载 %d 个提供商分组", len(m.providers))
 		}
 		m.updateReady()
 	case alternativesLoadedMsg:
@@ -220,6 +264,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		state.loadingAlternatives = false
 		state.lastError = nil
 		m.syncAltIdx(msg.providerID)
+		// 检查是否所有加载都完成，立即清除加载状态消息
+		if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
+			m.status = ""
+		}
 	case selectionLoadedMsg:
 		state := m.ensureProviderState(msg.providerID)
 		state.selection = msg.selection
@@ -227,6 +275,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		state.loadingSelection = false
 		state.lastError = nil
 		m.syncAltIdx(msg.providerID)
+		// 检查是否所有加载都完成，立即清除加载状态消息
+		if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
+			m.status = ""
+		}
 	case switchCompletedMsg:
 		state := m.ensureProviderState(msg.providerID)
 		state.selection = msg.selection
@@ -235,16 +287,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		state.lastError = nil
 		m.syncAltIdx(msg.providerID)
 		m.status = fmt.Sprintf("已切换到 %s", msg.selection.SelectedAlternative.DisplayName)
+		cmds = append(cmds, clearStatusAfterDelay(2))
 	case preferenceUpdatedMsg:
 		if m.profile != nil {
 			m.profile.BalancePreference = msg.preference
 		}
 		m.preferenceSwitching = false
+		m.syncBalancePreferenceIdx()
 		m.status = fmt.Sprintf("余额偏好已切换为 %s", describePreference(msg.preference))
+		cmds = append(cmds, clearStatusAfterDelay(2))
 	case preferenceFailedMsg:
 		m.preferenceSwitching = false
 		m.err = msg.err
 		m.status = fmt.Sprintf("余额偏好切换失败: %v", msg.err)
+		cmds = append(cmds, clearStatusAfterDelay(3))
 	case providerLoadFailedMsg:
 		state := m.ensureProviderState(msg.providerID)
 		switch msg.target {
@@ -258,9 +314,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		state.lastError = msg.err
 		m.err = msg.err
 		m.status = fmt.Sprintf("提供商 %d: %v", msg.providerID, msg.err)
+		cmds = append(cmds, clearStatusAfterDelay(3))
 	case errMsg:
 		m.err = msg.err
 		m.status = msg.err.Error()
+		// 如果是加载提供商失败，重置加载状态
+		if m.loadingProviders {
+			m.loadingProviders = false
+		}
+		cmds = append(cmds, clearStatusAfterDelay(3))
+	case clearStatusMsg:
+		m.status = ""
+		m.err = nil
 	}
 
 	// 更新 spinner
@@ -275,24 +340,42 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) View() string {
 	if !m.ready {
 		return lipgloss.NewStyle().Padding(1, 2).Render(
-			fmt.Sprintf("加载账号与提供商信息中，请稍候... %s", m.spinner.View()),
+			fmt.Sprintf("加载账号信息中，请稍候... %s", m.spinner.View()),
 		)
 	}
 
 	var sections []string
-	sections = append(sections, m.renderProfile())
 	sections = append(sections, m.help.View(m.keys))
-	sections = append(sections, m.renderPanels())
 
-	if m.status != "" {
-		sections = append(sections, statusStyle.Render(m.status))
+	// 添加 tab header
+	sections = append(sections, m.renderTabHeader())
+
+	// 根据当前 tab 渲染不同内容
+	if m.currentTab == tabProfile {
+		sections = append(sections, m.renderProfileTab())
+	} else if m.currentTab == tabProviders {
+		sections = append(sections, m.renderPanels())
+	} else if m.currentTab == tabBalancePreference {
+		sections = append(sections, m.renderBalancePreferenceTab())
 	}
+
+	// 始终渲染状态栏区域，保持视图高度一致
+	statusText := ""
+	if m.status != "" {
+		statusText = m.status
+		// 如果状态消息表示正在进行中，添加 spinner
+		if strings.Contains(statusText, "中...") || strings.Contains(statusText, "加载") {
+			statusText = fmt.Sprintf("%s %s", statusText, m.spinner.View())
+		}
+	}
+	sections = append(sections, statusStyle.Render(statusText))
 
 	return strings.Join(sections, "\n\n")
 }
 
 func (m *Model) updateReady() {
-	m.ready = m.profile != nil && len(m.providers) > 0
+	// 只要 profile 加载完成就可以显示界面（第一个tab只需要 profile）
+	m.ready = m.profile != nil
 }
 
 
@@ -305,30 +388,78 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.String() {
 	case "q", "esc":
 		return tea.Quit
+	case "1":
+		m.currentTab = tabProfile
+	case "2":
+		m.currentTab = tabProviders
+		m.focus = focusProviders
+		return m.ensureProvidersLoaded()
+	case "3":
+		m.currentTab = tabBalancePreference
+		m.syncBalancePreferenceIdx()
 	case "tab":
-		if m.focus == focusProviders {
-			m.focus = focusAlternatives
-		} else {
+		// Tab 键切换到下一个 tab
+		m.currentTab = (m.currentTab + 1) % 3
+		if m.currentTab == tabProviders {
 			m.focus = focusProviders
+			return m.ensureProvidersLoaded()
+		} else if m.currentTab == tabBalancePreference {
+			m.syncBalancePreferenceIdx()
 		}
 	case "left":
-		m.focus = focusProviders
+		if m.currentTab == tabProviders {
+			m.focus = focusProviders
+		}
 	case "right":
-		m.focus = focusAlternatives
+		if m.currentTab == tabProviders {
+			m.focus = focusAlternatives
+		}
 	case "r":
-		return m.refreshCurrentProvider()
-	case "b":
-		return m.toggleBalancePreference()
+		if m.currentTab == tabProviders {
+			return m.refreshCurrentProvider()
+		}
 	case "enter":
-		if m.focus == focusAlternatives {
+		if m.currentTab == tabProviders && m.focus == focusAlternatives {
 			return m.switchSelection()
+		} else if m.currentTab == tabBalancePreference {
+			return m.toggleBalancePreference()
 		}
 	case "up", "k":
+		if m.currentTab == tabProfile {
+			m.profileViewport.LineUp(1)
+			return nil
+		} else if m.currentTab == tabBalancePreference {
+			// 余额偏好tab：在两个选项之间移动
+			if m.balancePreferenceIdx > 0 {
+				m.balancePreferenceIdx--
+			}
+			return nil
+		}
 		return m.moveSelection(-1)
 	case "down", "j":
+		if m.currentTab == tabProfile {
+			m.profileViewport.LineDown(1)
+			return nil
+		} else if m.currentTab == tabBalancePreference {
+			// 余额偏好tab：在两个选项之间移动
+			if m.balancePreferenceIdx < 1 {
+				m.balancePreferenceIdx++
+			}
+			return nil
+		}
 		return m.moveSelection(1)
 	}
 	return nil
+}
+
+func (m *Model) ensureProvidersLoaded() tea.Cmd {
+	// 如果已经加载或正在加载，不重复请求
+	if m.providersLoaded || m.loadingProviders {
+		return nil
+	}
+	m.loadingProviders = true
+	m.status = "加载提供商列表中..."
+	return loadProvidersCmd(m.client)
 }
 
 func (m *Model) moveSelection(delta int) tea.Cmd {
@@ -390,13 +521,37 @@ func (m *Model) toggleBalancePreference() tea.Cmd {
 	if m.profile == nil || m.preferenceSwitching {
 		return nil
 	}
-	target := nextPreference(m.profile.BalancePreference)
+
+	// 根据选中的索引确定目标偏好
+	var target string
+	if m.balancePreferenceIdx == 0 {
+		target = "subscription_first"
+	} else {
+		target = "payg_only"
+	}
+
+	// 如果已经是当前偏好，不需要切换
 	if target == m.profile.BalancePreference {
 		return nil
 	}
+
 	m.preferenceSwitching = true
 	m.status = fmt.Sprintf("切换余额偏好到 %s...", describePreference(target))
 	return updatePreferenceCmd(m.client, target)
+}
+
+func (m *Model) syncBalancePreferenceIdx() {
+	if m.profile == nil {
+		m.balancePreferenceIdx = 0
+		return
+	}
+
+	// 根据当前的 BalancePreference 设置索引
+	if m.profile.BalancePreference == "payg_only" {
+		m.balancePreferenceIdx = 1
+	} else {
+		m.balancePreferenceIdx = 0
+	}
 }
 
 func (m *Model) queueProviderDetailLoad(providerID int) tea.Cmd {
@@ -405,13 +560,19 @@ func (m *Model) queueProviderDetailLoad(providerID int) tea.Cmd {
 	}
 	state := m.ensureProviderState(providerID)
 	var cmds []tea.Cmd
+	var loading bool
 	if !state.alternativesLoaded && !state.loadingAlternatives {
 		state.loadingAlternatives = true
 		cmds = append(cmds, loadAlternativesCmd(m.client, providerID))
+		loading = true
 	}
 	if !state.selectionLoaded && !state.loadingSelection {
 		state.loadingSelection = true
 		cmds = append(cmds, loadSelectionCmd(m.client, providerID))
+		loading = true
+	}
+	if loading {
+		m.status = fmt.Sprintf("加载提供商 %d 详情中...", providerID)
 	}
 	if len(cmds) == 0 {
 		return nil
@@ -475,47 +636,27 @@ func clampIndex(idx, length int) int {
 	return idx
 }
 
-func (m *Model) renderProfile() string {
-	if m.profile == nil {
-		return "账号信息加载中..."
-	}
-	lines := []string{
-		titleStyle.Render(fmt.Sprintf("%s (%s)", m.profile.Username, m.profile.Email)),
-		fmt.Sprintf("总余额: $%.2f | 订阅余额: $%.2f | 按需: $%.2f", m.profile.Balance, m.profile.SubscriptionBalance, m.profile.PayAsYouGoBalance),
-		fmt.Sprintf("偏好: %s | 本周消费: $%.2f | 本月消费: $%.2f", describePreference(m.profile.BalancePreference), m.profile.CurrentWeekSpend, m.profile.CurrentMonthSpend),
-	}
-	if m.profile.SubscriptionPlan.Name != "" {
-		plan := m.profile.SubscriptionPlan
-		lines = append(lines,
-			fmt.Sprintf("订阅: %s ($%.2f) 截止 %s | 每日额度: $%.2f | 周限额: $%.2f | 月限额: $%.2f",
-				plan.Name,
-				plan.Price,
-				m.profile.SubscriptionExpiry,
-				plan.DailyBalance,
-				plan.WeeklyLimit,
-				plan.MonthlySpendLimit))
-	}
-	return strings.Join(lines, "\n")
-}
-
-func (m *Model) renderHelp() string {
-	return helpStyle.Render("↑↓/jk: 移动  |  Tab/←→: 切换焦点  |  Enter: 切换提供商  |  b: 切换余额偏好  |  r: 刷新  |  q: 退出")
+// contentHeight 返回内容区域的固定高度
+func (m *Model) contentHeight() int {
+	return 20
 }
 
 func (m *Model) renderPanels() string {
 	left := m.renderProvidersPanel()
 	right := m.renderAlternativesPanel()
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+
+	// 水平拼接左右两个面板
+	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+
+	return panels
 }
 
 func (m *Model) renderProvidersPanel() string {
 	var lines []string
 
-	// 添加面板标题
-	lines = append(lines, titleStyle.Render("提供商"))
-	lines = append(lines, "")  // 空行分隔
-
-	if len(m.providers) == 0 {
+	if m.loadingProviders {
+		lines = append(lines, fmt.Sprintf("加载提供商列表中... %s", m.spinner.View()))
+	} else if len(m.providers) == 0 {
 		lines = append(lines, "没有可用提供商")
 	} else {
 		for i, bucket := range m.providers {
@@ -540,15 +681,11 @@ func (m *Model) renderProvidersPanel() string {
 	if m.focus == focusProviders {
 		style = style.Copy().BorderStyle(activeBorder).BorderForeground(primaryColor)
 	}
-	return style.Width(m.panelWidth()).Render(content)
+	return style.Width(m.panelWidth()).Height(10).Render(content)
 }
 
 func (m *Model) renderAlternativesPanel() string {
 	var lines []string
-
-	// 添加面板标题
-	lines = append(lines, titleStyle.Render("替代方案"))
-	lines = append(lines, "")  // 空行分隔
 
 	if len(m.providers) == 0 {
 		lines = append(lines, "尚未选择提供商")
@@ -595,7 +732,7 @@ func (m *Model) renderAlternativesPanel() string {
 	if m.focus == focusAlternatives {
 		style = style.Copy().BorderStyle(activeBorder).BorderForeground(primaryColor)
 	}
-	return style.Width(m.panelWidth()).Render(content)
+	return style.Width(m.panelWidth()).Height(10).Render(content)
 }
 
 func (m *Model) panelWidth() int {
@@ -652,15 +789,191 @@ func formatAlternativeTypeSuffix(providerType string) string {
 }
 
 var (
-	primaryColor         = lipgloss.Color("#00B894")
-	panelStyle           = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 2).BorderForeground(lipgloss.Color("#666666"))
-	activeBorder         = lipgloss.RoundedBorder()
-	titleStyle           = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
-	helpStyle            = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
-	statusStyle          = lipgloss.NewStyle().Foreground(primaryColor)
-	activeIndicatorStyle = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
-	selectedItemStyle    = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
+	primaryColor      = lipgloss.Color("#00B894")
+	panelStyle        = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 2).BorderForeground(lipgloss.Color("#666666"))
+	activeBorder      = lipgloss.RoundedBorder()
+	titleStyle        = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
+	helpStyle         = lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	statusStyle       = lipgloss.NewStyle().Foreground(primaryColor)
+	selectedItemStyle = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(primaryColor).Padding(0, 2).Border(lipgloss.RoundedBorder(), false, false, true, false).BorderForeground(primaryColor)
+	inactiveTabStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#666666")).Padding(0, 2)
 )
+
+func (m *Model) renderTabHeader() string {
+	tabs := []string{}
+
+	// Tab 1: 个人资料
+	if m.currentTab == tabProfile {
+		tabs = append(tabs, activeTabStyle.Render("个人资料"))
+	} else {
+		tabs = append(tabs, inactiveTabStyle.Render("个人资料"))
+	}
+
+	// Tab 2: 提供商
+	if m.currentTab == tabProviders {
+		tabs = append(tabs, activeTabStyle.Render("提供商"))
+	} else {
+		tabs = append(tabs, inactiveTabStyle.Render("提供商"))
+	}
+
+	// Tab 3: 余额使用偏好
+	if m.currentTab == tabBalancePreference {
+		tabs = append(tabs, activeTabStyle.Render("余额使用偏好"))
+	} else {
+		tabs = append(tabs, inactiveTabStyle.Render("余额使用偏好"))
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
+}
+
+func (m *Model) renderProfileTab() string {
+	if m.profile == nil {
+		return "加载中..."
+	}
+
+	var lines []string
+
+	// 账户信息
+	lines = append(lines, titleStyle.Render("账户信息"))
+	lines = append(lines, fmt.Sprintf("用户名: %s", m.profile.Username))
+	lines = append(lines, fmt.Sprintf("邮箱: %s", m.profile.Email))
+	lines = append(lines, "")
+
+	// 余额概览
+	lines = append(lines, titleStyle.Render("余额概览"))
+	lines = append(lines, fmt.Sprintf("订阅余额: $%.2f", m.profile.SubscriptionBalance))
+	lines = append(lines, fmt.Sprintf("按需余额: $%.2f", m.profile.PayAsYouGoBalance))
+	lines = append(lines, fmt.Sprintf("总余额: $%.2f", m.profile.Balance))
+	lines = append(lines, fmt.Sprintf("余额使用偏好: %s", describePreference(m.profile.BalancePreference)))
+
+	// 订阅计划（如果存在）
+	if m.profile.SubscriptionPlan.Name != "" {
+		lines = append(lines, "")
+		lines = append(lines, titleStyle.Render("订阅计划"))
+		plan := m.profile.SubscriptionPlan
+		lines = append(lines, fmt.Sprintf("计划: %s ($%.2f)", plan.Name, plan.Price))
+
+		// 优化截止日期显示
+		if m.profile.SubscriptionExpiry != "" {
+			expiryDate := m.formatDate(m.profile.SubscriptionExpiry)
+			lines = append(lines, fmt.Sprintf("到期: %s", expiryDate))
+		}
+
+		lines = append(lines, fmt.Sprintf("每日额度: $%.2f", plan.DailyBalance))
+
+		// 本周消费（带百分比）
+		weekPercent := 0.0
+		if plan.WeeklyLimit > 0 {
+			weekPercent = (m.profile.CurrentWeekSpend / plan.WeeklyLimit) * 100
+		}
+		lines = append(lines, fmt.Sprintf("本周: $%.2f / $%.2f (%.1f%%)",
+			m.profile.CurrentWeekSpend, plan.WeeklyLimit, weekPercent))
+
+		// 本月消费（带百分比）
+		monthPercent := 0.0
+		if plan.MonthlySpendLimit > 0 {
+			monthPercent = (m.profile.CurrentMonthSpend / plan.MonthlySpendLimit) * 100
+		}
+		lines = append(lines, fmt.Sprintf("本月: $%.2f / $%.2f (%.1f%%)",
+			m.profile.CurrentMonthSpend, plan.MonthlySpendLimit, monthPercent))
+	} else {
+		// 如果没有订阅计划，仍然显示消费统计
+		lines = append(lines, "")
+		lines = append(lines, titleStyle.Render("消费统计"))
+		lines = append(lines, fmt.Sprintf("本周消费: $%.2f", m.profile.CurrentWeekSpend))
+		lines = append(lines, fmt.Sprintf("本月消费: $%.2f", m.profile.CurrentMonthSpend))
+	}
+
+	content := strings.Join(lines, "\n")
+
+	// 更新 viewport 的内容和尺寸
+	m.profileViewport.SetContent(content)
+	m.profileViewport.Height = m.contentHeight()
+	if m.width > 0 {
+		m.profileViewport.Width = m.width - 4 // 减去一些边距
+	}
+
+	var output []string
+
+	// viewport 主内容
+	output = append(output, m.profileViewport.View())
+
+	// 底部滚动指示器
+	var bottomParts []string
+	if !m.profileViewport.AtBottom() {
+		moreIndicator := lipgloss.NewStyle().
+			Foreground(primaryColor).
+			Bold(true).
+			Render("↓ 更多内容")
+		bottomParts = append(bottomParts, moreIndicator)
+	}
+
+	if len(bottomParts) > 0 {
+		output = append(output, strings.Join(bottomParts, "  "))
+	}
+
+	return strings.Join(output, "\n")
+}
+
+// formatDate 优化日期显示的可读性
+func (m *Model) formatDate(dateStr string) string {
+	// 尝试解析常见的日期格式
+	formats := []string{
+		"2006-01-02T15:04:05Z",
+		"2006-01-02T15:04:05-07:00",
+		"2006-01-02",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, dateStr); err == nil {
+			// 返回更友好的格式：2024年1月15日
+			return t.Format("2006年1月2日")
+		}
+	}
+
+	// 如果解析失败，返回原始字符串
+	return dateStr
+}
+
+func (m *Model) renderBalancePreferenceTab() string {
+	if m.profile == nil {
+		return "加载中..."
+	}
+
+	var lines []string
+
+	// 优先订阅选项 (索引0)
+	prefix := "  "
+	if m.balancePreferenceIdx == 0 {
+		prefix = "→ "
+	}
+	label := "优先订阅"
+	if m.profile.BalancePreference == "subscription_first" {
+		label = label + " [当前]"
+		lines = append(lines, selectedItemStyle.Render(prefix+label))
+	} else {
+		lines = append(lines, prefix+label)
+	}
+	lines = append(lines, "    先使用订阅余额，然后使用按需付费。OPUS使用限制适用。")
+	lines = append(lines, "")
+
+	// 仅按需付费选项 (索引1)
+	prefix = "  "
+	if m.balancePreferenceIdx == 1 {
+		prefix = "→ "
+	}
+	label = "仅按需付费"
+	if m.profile.BalancePreference == "payg_only" {
+		label = label + " [当前]"
+		lines = append(lines, selectedItemStyle.Render(prefix+label))
+	} else {
+		lines = append(lines, prefix+label)
+	}
+	lines = append(lines, "    始终使用按需付费余额。无OPUS使用限制。")
+
+	return strings.Join(lines, "\n")
+}
 
 func loadProfileCmd(client *api.Client) tea.Cmd {
 	return func() tea.Msg {
@@ -722,12 +1035,18 @@ func updatePreferenceCmd(client *api.Client, preference string) tea.Cmd {
 	}
 }
 
+func clearStatusAfterDelay(seconds int) tea.Cmd {
+	return tea.Tick(time.Duration(seconds)*time.Second, func(time.Time) tea.Msg {
+		return clearStatusMsg{}
+	})
+}
+
 func describePreference(pref string) string {
 	switch pref {
 	case "subscription_first":
-		return "订阅优先"
+		return "优先订阅"
 	case "payg_only":
-		return "仅按需"
+		return "仅按需付费"
 	default:
 		if pref == "" {
 			return "未知"
