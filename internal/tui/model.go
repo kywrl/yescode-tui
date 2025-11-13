@@ -346,7 +346,6 @@ func (m *Model) View() string {
 		Align(lipgloss.Center)
 
 	sections = append(sections, titleStyle.Render("◆ YesCode Terminal ◆"))
-	sections = append(sections, "")
 
 	sections = append(sections, m.help.View(m.keys))
 
