@@ -338,7 +338,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) View() string {
 	var sections []string
 
-	// 经典终端风格应用标题
+	// Material Design 风格应用标题
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(primaryColor).
@@ -350,8 +350,8 @@ func (m *Model) View() string {
 		Width(m.width).
 		Align(lipgloss.Center)
 
-	sections = append(sections, titleStyle.Render("=== YesCode Terminal ==="))
-	sections = append(sections, subtitleStyle.Render("v0.1"))
+	sections = append(sections, titleStyle.Render("YesCode"))
+	sections = append(sections, subtitleStyle.Render("AI Model Provider Management"))
 	sections = append(sections, "")
 
 	sections = append(sections, m.help.View(m.keys))
@@ -674,7 +674,7 @@ func (m *Model) renderProvidersPanel() string {
 		for i, bucket := range m.providers {
 			prefix := "  "
 			if i == m.providerIdx {
-				prefix = "> "
+				prefix = "▶ "
 			}
 			lines = append(lines,
 				fmt.Sprintf("%s%s%s%s",
@@ -709,7 +709,7 @@ func (m *Model) renderAlternativesPanel() string {
 			lines = append(lines, fmt.Sprintf("加载中... %s", m.spinner.View()))
 		case state.lastError != nil:
 			errorStyle := lipgloss.NewStyle().Foreground(errorColor)
-			lines = append(lines, errorStyle.Render(fmt.Sprintf("[!] 错误：%v", state.lastError)))
+			lines = append(lines, errorStyle.Render(fmt.Sprintf("⚠ 错误：%v", state.lastError)))
 			lines = append(lines, "")
 			lines = append(lines, "按 r 键重试")
 		case len(state.alternatives) == 0:
@@ -718,14 +718,14 @@ func (m *Model) renderAlternativesPanel() string {
 			for i, alt := range state.alternatives {
 				prefix := "  "
 				if i == m.altIdx {
-					prefix = "> "
+					prefix = "▶ "
 				}
 
 				// 检查是否为当前选中项
 				isCurrentSelection := state.selection != nil && state.selection.SelectedAlternativeID == alt.Alternative.ID
 
 				// 构建行内容
-				lineText := fmt.Sprintf("%s%s x%.2f",
+				lineText := fmt.Sprintf("%s%s ×%.2f",
 					prefix,
 					alt.Alternative.DisplayName,
 					alt.Alternative.RateMultiplier,
@@ -734,7 +734,7 @@ func (m *Model) renderAlternativesPanel() string {
 				// 如果是当前选中项，添加标记
 				if isCurrentSelection {
 					checkStyle := lipgloss.NewStyle().Foreground(successColor)
-					lineText = selectedItemStyle.Render(lineText) + " " + checkStyle.Render("[X]")
+					lineText = selectedItemStyle.Render(lineText) + " " + checkStyle.Render("✓")
 				}
 
 				lines = append(lines, lineText)
@@ -805,23 +805,23 @@ func formatAlternativeTypeSuffix(providerType string) string {
 }
 
 var (
-	// 经典终端风格配色 - VT100 绿色终端
-	primaryColor      = lipgloss.Color("#33FF33")  // 经典终端绿
-	secondaryColor    = lipgloss.Color("#00AA00")  // 深绿色
-	accentColor       = lipgloss.Color("#55FF55")  // 亮绿色
-	mutedColor        = lipgloss.Color("#008800")  // 暗绿色
-	successColor      = lipgloss.Color("#33FF33")  // 绿色（成功）
-	errorColor        = lipgloss.Color("#FF0000")  // 红色（错误）
-	warningColor      = lipgloss.Color("#FFFF00")  // 黄色（警告）
+	// Material Design 风格配色
+	primaryColor      = lipgloss.Color("#2196F3")  // Material Blue
+	secondaryColor    = lipgloss.Color("#1976D2")  // Dark Blue
+	accentColor       = lipgloss.Color("#FF4081")  // Pink Accent
+	mutedColor        = lipgloss.Color("#9E9E9E")  // Grey
+	successColor      = lipgloss.Color("#4CAF50")  // Green
+	errorColor        = lipgloss.Color("#F44336")  // Red
+	warningColor      = lipgloss.Color("#FF9800")  // Orange
 
-	panelStyle        = lipgloss.NewStyle().Border(lipgloss.NormalBorder()).Padding(1, 2).BorderForeground(primaryColor)
-	activeBorder      = lipgloss.NormalBorder()
+	panelStyle        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).BorderForeground(mutedColor)
+	activeBorder      = lipgloss.RoundedBorder()
 	titleStyle        = lipgloss.NewStyle().Bold(true).Foreground(primaryColor)
 	helpStyle         = lipgloss.NewStyle().Foreground(mutedColor)
 	statusStyle       = lipgloss.NewStyle().Foreground(primaryColor)
 	selectedItemStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000")).Background(primaryColor).Padding(0, 2).MarginRight(1)
-	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 2).MarginRight(1)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(0, 3).MarginRight(1)
+	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 3).MarginRight(1)
 )
 
 func (m *Model) renderTabHeader() string {
@@ -850,9 +850,9 @@ func (m *Model) renderTabHeader() string {
 
 	tabsRow := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 
-	// 添加切换引导提示 - 经典终端风格
-	hintStyle := lipgloss.NewStyle().Foreground(mutedColor)
-	hint := hintStyle.Render("  Press 1-3 or Tab to switch")
+	// Material Design 风格提示
+	hintStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)
+	hint := hintStyle.Render("  ● Use 1-3 or Tab to navigate")
 
 	return tabsRow + hint
 }
@@ -864,40 +864,40 @@ func (m *Model) renderProfileTab() string {
 
 	var lines []string
 
-	// 账户信息 - 经典终端风格
-	lines = append(lines, titleStyle.Render("=== 账户信息 ==="))
+	// Material Design 风格标题
+	lines = append(lines, titleStyle.Render("账户信息"))
 	lines = append(lines, fmt.Sprintf("  用户名：%s", m.profile.Username))
 	lines = append(lines, fmt.Sprintf("  邮箱：%s", m.profile.Email))
 	lines = append(lines, "")
 
 	// 余额概览
-	lines = append(lines, titleStyle.Render("=== 余额概览 ==="))
-	lines = append(lines, fmt.Sprintf("  - 订阅余额：$%.2f", m.profile.SubscriptionBalance))
-	lines = append(lines, fmt.Sprintf("  - 按需余额：$%.2f", m.profile.PayAsYouGoBalance))
-	lines = append(lines, fmt.Sprintf("  - 总余额：$%.2f", m.profile.Balance))
-	lines = append(lines, fmt.Sprintf("  - 余额偏好：%s", describePreference(m.profile.BalancePreference)))
+	lines = append(lines, titleStyle.Render("余额概览"))
+	lines = append(lines, fmt.Sprintf("  ● 订阅余额：$%.2f", m.profile.SubscriptionBalance))
+	lines = append(lines, fmt.Sprintf("  ● 按需余额：$%.2f", m.profile.PayAsYouGoBalance))
+	lines = append(lines, fmt.Sprintf("  ● 总余额：$%.2f", m.profile.Balance))
+	lines = append(lines, fmt.Sprintf("  ● 余额偏好：%s", describePreference(m.profile.BalancePreference)))
 
 	// 订阅计划（如果存在）
 	if m.profile.SubscriptionPlan.Name != "" {
 		lines = append(lines, "")
-		lines = append(lines, titleStyle.Render("=== 订阅计划 ==="))
+		lines = append(lines, titleStyle.Render("订阅计划"))
 		plan := m.profile.SubscriptionPlan
-		lines = append(lines, fmt.Sprintf("  - 计划：%s ($%.2f)", plan.Name, plan.Price))
+		lines = append(lines, fmt.Sprintf("  ● 计划：%s ($%.2f)", plan.Name, plan.Price))
 
 		// 优化截止日期显示
 		if m.profile.SubscriptionExpiry != "" {
 			expiryDate := m.formatDate(m.profile.SubscriptionExpiry)
-			lines = append(lines, fmt.Sprintf("  - 到期：%s", expiryDate))
+			lines = append(lines, fmt.Sprintf("  ● 到期：%s", expiryDate))
 		}
 
-		lines = append(lines, fmt.Sprintf("  - 每日额度：$%.2f", plan.DailyBalance))
+		lines = append(lines, fmt.Sprintf("  ● 每日额度：$%.2f", plan.DailyBalance))
 
 		// 本周消费（带百分比）
 		weekPercent := 0.0
 		if plan.WeeklyLimit > 0 {
 			weekPercent = (m.profile.CurrentWeekSpend / plan.WeeklyLimit) * 100
 		}
-		lines = append(lines, fmt.Sprintf("  - 本周：$%.2f / $%.2f (%.1f%%)",
+		lines = append(lines, fmt.Sprintf("  ● 本周：$%.2f / $%.2f (%.1f%%)",
 			m.profile.CurrentWeekSpend, plan.WeeklyLimit, weekPercent))
 
 		// 本月消费（带百分比）
@@ -905,14 +905,14 @@ func (m *Model) renderProfileTab() string {
 		if plan.MonthlySpendLimit > 0 {
 			monthPercent = (m.profile.CurrentMonthSpend / plan.MonthlySpendLimit) * 100
 		}
-		lines = append(lines, fmt.Sprintf("  - 本月：$%.2f / $%.2f (%.1f%%)",
+		lines = append(lines, fmt.Sprintf("  ● 本月：$%.2f / $%.2f (%.1f%%)",
 			m.profile.CurrentMonthSpend, plan.MonthlySpendLimit, monthPercent))
 	} else {
 		// 如果没有订阅计划，仍然显示消费统计
 		lines = append(lines, "")
-		lines = append(lines, titleStyle.Render("=== 消费统计 ==="))
-		lines = append(lines, fmt.Sprintf("  - 本周消费：$%.2f", m.profile.CurrentWeekSpend))
-		lines = append(lines, fmt.Sprintf("  - 本月消费：$%.2f", m.profile.CurrentMonthSpend))
+		lines = append(lines, titleStyle.Render("消费统计"))
+		lines = append(lines, fmt.Sprintf("  ● 本周消费：$%.2f", m.profile.CurrentWeekSpend))
+		lines = append(lines, fmt.Sprintf("  ● 本月消费：$%.2f", m.profile.CurrentMonthSpend))
 	}
 
 	content := strings.Join(lines, "\n")
@@ -933,9 +933,9 @@ func (m *Model) renderProfileTab() string {
 	var bottomParts []string
 	if !m.profileViewport.AtBottom() {
 		moreIndicator := lipgloss.NewStyle().
-			Foreground(primaryColor).
+			Foreground(accentColor).
 			Bold(true).
-			Render("[More...]")
+			Render("▼ 更多内容")
 		bottomParts = append(bottomParts, moreIndicator)
 	}
 
@@ -976,12 +976,12 @@ func (m *Model) renderBalancePreferenceTab() string {
 	// 优先订阅选项 (索引0)
 	prefix := "  "
 	if m.balancePreferenceIdx == 0 {
-		prefix = "> "
+		prefix = "▶ "
 	}
 	label := "优先订阅"
 	if m.profile.BalancePreference == "subscription_first" {
 		checkStyle := lipgloss.NewStyle().Foreground(successColor)
-		lines = append(lines, selectedItemStyle.Render(prefix+label)+" "+checkStyle.Render("[X]"))
+		lines = append(lines, selectedItemStyle.Render(prefix+label)+" "+checkStyle.Render("✓"))
 	} else {
 		lines = append(lines, prefix+label)
 	}
@@ -992,12 +992,12 @@ func (m *Model) renderBalancePreferenceTab() string {
 	// 仅按需付费选项 (索引1)
 	prefix = "  "
 	if m.balancePreferenceIdx == 1 {
-		prefix = "> "
+		prefix = "▶ "
 	}
 	label = "仅按需付费"
 	if m.profile.BalancePreference == "payg_only" {
 		checkStyle := lipgloss.NewStyle().Foreground(successColor)
-		lines = append(lines, selectedItemStyle.Render(prefix+label)+" "+checkStyle.Render("[X]"))
+		lines = append(lines, selectedItemStyle.Render(prefix+label)+" "+checkStyle.Render("✓"))
 	} else {
 		lines = append(lines, prefix+label)
 	}
