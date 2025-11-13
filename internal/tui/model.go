@@ -346,9 +346,6 @@ func (m *Model) View() string {
 		Align(lipgloss.Center)
 
 	sections = append(sections, titleStyle.Render("◆ YesCode Terminal ◆"))
-	sections = append(sections, "")
-
-	sections = append(sections, m.help.View(m.keys))
 
 	// 添加 tab header
 	sections = append(sections, m.renderTabHeader())
@@ -846,7 +843,7 @@ func (m *Model) renderTabHeader() string {
 
 	// Material Design 风格提示
 	hintStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)
-	hint := hintStyle.Render("  ● Use 1-3 or Tab to navigate")
+	hint := hintStyle.Render("  ● 使用数字键 1-3 或 Tab 切换")
 
 	return tabsRow + hint
 }
