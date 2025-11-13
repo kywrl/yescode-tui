@@ -346,6 +346,9 @@ func (m *Model) View() string {
 		Align(lipgloss.Center)
 
 	sections = append(sections, titleStyle.Render("◆ YesCode Terminal ◆"))
+	sections = append(sections, "")
+
+	sections = append(sections, m.help.View(m.keys))
 
 	// 添加 tab header
 	sections = append(sections, m.renderTabHeader())
