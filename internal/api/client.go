@@ -14,7 +14,7 @@ import (
 const (
 	defaultBaseURL   = "https://co.yes.vg"
 	defaultTimeout   = 5 * time.Second
-	defaultUserAgent = "yescode-cli/0.1"
+	defaultUserAgent = "yescode-tui/0.1"
 )
 
 // Client wraps HTTP access to the YesCode API.

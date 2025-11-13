@@ -15,7 +15,7 @@
 go.work
 
 # Build output
-yescode
+/yescode
 yescode.exe
 dist/
 build/

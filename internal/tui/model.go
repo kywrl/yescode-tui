@@ -13,7 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"yescode-cli/internal/api"
+	"yescode-tui/internal/api"
 )
 
 type focusArea int
@@ -35,26 +35,26 @@ const (
 type Model struct {
 	client *api.Client
 
-	profile             *api.Profile
-	providers           []api.ProviderBucket
-	providerIdx         int
-	altIdx              int
+	profile              *api.Profile
+	providers            []api.ProviderBucket
+	providerIdx          int
+	altIdx               int
 	balancePreferenceIdx int
-	focus               focusArea
-	currentTab          tabIndex
-	ready               bool
-	status              string
-	err                 error
-	width               int
-	height              int
-	providerData        map[int]*providerState
-	preferenceSwitching bool
-	spinner             spinner.Model
-	help                help.Model
-	keys                keyMap
-	profileViewport     viewport.Model
-	providersLoaded     bool
-	loadingProviders    bool
+	focus                focusArea
+	currentTab           tabIndex
+	ready                bool
+	status               string
+	err                  error
+	width                int
+	height               int
+	providerData         map[int]*providerState
+	preferenceSwitching  bool
+	spinner              spinner.Model
+	help                 help.Model
+	keys                 keyMap
+	profileViewport      viewport.Model
+	providersLoaded      bool
+	loadingProviders     bool
 }
 
 type providerState struct {
@@ -185,7 +185,6 @@ type errMsg struct {
 
 type clearStatusMsg struct{}
 
-
 // NewModel constructs the root Bubble Tea model.
 func NewModel(client *api.Client) *Model {
 	// 创建 spinner
@@ -204,15 +203,15 @@ func NewModel(client *api.Client) *Model {
 	vp := viewport.New(0, 20)
 
 	return &Model{
-		client:           client,
-		focus:            focusProviders,
-		providerData:     make(map[int]*providerState),
-		spinner:          s,
-		help:             h,
-		keys:             keys,
-		profileViewport:  vp,
-		ready:            true,
-		status:           "正在加载个人资料...",
+		client:          client,
+		focus:           focusProviders,
+		providerData:    make(map[int]*providerState),
+		spinner:         s,
+		help:            h,
+		keys:            keys,
+		profileViewport: vp,
+		ready:           true,
+		status:          "正在加载个人资料...",
 	}
 }
 
@@ -345,7 +344,7 @@ func (m *Model) View() string {
 		Width(m.width).
 		Align(lipgloss.Center)
 
-	sections = append(sections, titleStyle.Render("◆ YesCode Terminal ◆"))
+	sections = append(sections, titleStyle.Render("◆ YesCode TUI ◆"))
 
 	sections = append(sections, m.help.View(m.keys))
 
@@ -374,7 +373,6 @@ func (m *Model) View() string {
 
 	return strings.Join(sections, "\n\n")
 }
-
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Type {
@@ -480,7 +478,6 @@ func (m *Model) moveSelection(delta int) tea.Cmd {
 	return nil
 }
 
-
 func (m *Model) refreshProfile() tea.Cmd {
 	m.profile = nil
 	m.status = "正在刷新个人资料..."
@@ -520,7 +517,6 @@ func (m *Model) switchSelection() tea.Cmd {
 	m.status = fmt.Sprintf("切换到 %s 中...", target.DisplayName)
 	return switchProviderCmd(m.client, m.currentProviderID(), target.ID)
 }
-
 
 func (m *Model) toggleBalancePreference() tea.Cmd {
 	if m.profile == nil || m.preferenceSwitching {
@@ -755,7 +751,6 @@ func (m *Model) panelWidth() int {
 	return w
 }
 
-
 func formatSourceSuffix(source string) string {
 	label := translateSourceLabel(source)
 	if label == "" {
@@ -799,13 +794,13 @@ func formatAlternativeTypeSuffix(providerType string) string {
 
 var (
 	// Material Design 风格配色
-	primaryColor      = lipgloss.Color("#2196F3")  // Material Blue
-	secondaryColor    = lipgloss.Color("#1976D2")  // Dark Blue
-	accentColor       = lipgloss.Color("#FF4081")  // Pink Accent
-	mutedColor        = lipgloss.Color("#9E9E9E")  // Grey
-	successColor      = lipgloss.Color("#4CAF50")  // Green
-	errorColor        = lipgloss.Color("#F44336")  // Red
-	warningColor      = lipgloss.Color("#FF9800")  // Orange
+	primaryColor   = lipgloss.Color("#2196F3") // Material Blue
+	secondaryColor = lipgloss.Color("#1976D2") // Dark Blue
+	accentColor    = lipgloss.Color("#FF4081") // Pink Accent
+	mutedColor     = lipgloss.Color("#9E9E9E") // Grey
+	successColor   = lipgloss.Color("#4CAF50") // Green
+	errorColor     = lipgloss.Color("#F44336") // Red
+	warningColor   = lipgloss.Color("#FF9800") // Orange
 
 	panelStyle        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2).BorderForeground(mutedColor)
 	activeBorder      = lipgloss.RoundedBorder()
