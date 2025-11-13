@@ -13,7 +13,7 @@ import (
 
 const (
 	defaultBaseURL   = "https://co.yes.vg"
-	defaultTimeout   = 15 * time.Second
+	defaultTimeout   = 5 * time.Second
 	defaultUserAgent = "yescode-cli/0.1"
 )
 
@@ -229,11 +229,19 @@ func (c *Client) UpdateBalancePreference(ctx context.Context, preference string)
 }
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
-	req, err := c.newRequest(ctx, http.MethodGet, path, nil)
-	if err != nil {
-		return err
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := c.newRequest(ctx, http.MethodGet, path, nil)
+		if err != nil {
+			return err
+		}
+		err = c.do(req, out)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
 	}
-	return c.do(req, out)
+	return lastErr
 }
 
 func (c *Client) put(ctx context.Context, path string, body any, out any) error {
