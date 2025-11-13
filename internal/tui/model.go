@@ -137,8 +137,8 @@ var keys = keyMap{
 		key.WithHelp("3", "余额使用偏好"),
 	),
 	Quit: key.NewBinding(
-		key.WithKeys("q", "esc", "ctrl+c"),
-		key.WithHelp("q/esc", "退出"),
+		key.WithKeys("esc", "ctrl+c"),
+		key.WithHelp("esc", "退出"),
 	),
 }
 
@@ -211,7 +211,8 @@ func NewModel(client *api.Client) *Model {
 		help:             h,
 		keys:             keys,
 		profileViewport:  vp,
-		status:           "加载个人资料中...",
+		ready:            true,
+		status:           "正在加载个人资料...",
 	}
 }
 
@@ -239,9 +240,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case profileLoadedMsg:
 		m.profile = msg.profile
-		m.status = fmt.Sprintf("欢迎 %s", msg.profile.Username)
-		m.updateReady()
-		cmds = append(cmds, clearStatusAfterDelay(3))
+		m.status = ""
 	case providersLoadedMsg:
 		m.providers = msg.response.Providers
 		m.providersLoaded = true
@@ -256,7 +255,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.providers) > 0 {
 			cmds = append(cmds, m.queueProviderDetailLoad(m.currentProviderID()))
 		}
-		m.updateReady()
 	case alternativesLoadedMsg:
 		state := m.ensureProviderState(msg.providerID)
 		state.alternatives = msg.alternatives
@@ -338,12 +336,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View renders the TUI.
 func (m *Model) View() string {
-	if !m.ready {
-		return lipgloss.NewStyle().Padding(1, 2).Render(
-			fmt.Sprintf("加载账号信息中，请稍候... %s", m.spinner.View()),
-		)
-	}
-
 	var sections []string
 	sections = append(sections, m.help.View(m.keys))
 
@@ -373,11 +365,6 @@ func (m *Model) View() string {
 	return strings.Join(sections, "\n\n")
 }
 
-func (m *Model) updateReady() {
-	// 只要 profile 加载完成就可以显示界面（第一个tab只需要 profile）
-	m.ready = m.profile != nil
-}
-
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Type {
@@ -386,7 +373,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	}
 
 	switch msg.String() {
-	case "q", "esc":
+	case "esc":
 		return tea.Quit
 	case "1":
 		m.currentTab = tabProfile
@@ -415,7 +402,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			m.focus = focusAlternatives
 		}
 	case "r":
-		if m.currentTab == tabProviders {
+		if m.currentTab == tabProfile {
+			return m.refreshProfile()
+		} else if m.currentTab == tabProviders {
 			return m.refreshCurrentProvider()
 		}
 	case "enter":
@@ -481,6 +470,12 @@ func (m *Model) moveSelection(delta int) tea.Cmd {
 	return nil
 }
 
+
+func (m *Model) refreshProfile() tea.Cmd {
+	m.profile = nil
+	m.status = "正在刷新个人资料..."
+	return loadProfileCmd(m.client)
+}
 
 func (m *Model) refreshCurrentProvider() tea.Cmd {
 	if len(m.providers) == 0 {
@@ -829,7 +824,7 @@ func (m *Model) renderTabHeader() string {
 
 func (m *Model) renderProfileTab() string {
 	if m.profile == nil {
-		return "加载中..."
+		return ""
 	}
 
 	var lines []string
