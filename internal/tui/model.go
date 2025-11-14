@@ -386,7 +386,7 @@ func (m *Model) View() string {
 		Foreground(mutedColor).
 		Width(m.width).
 		Align(lipgloss.Center)
-	sections = append(sections, helpHintStyle.Render("支持鼠标操作 · Enter 确认 · Esc 退出 · 输入 ? 查看完整操作指南"))
+	sections = append(sections, helpHintStyle.Render("支持鼠标操作 · Enter 确认 · Esc 退出 · 输入 ? 查看完整操作帮助"))
 
 	// 添加 tab header
 	sections = append(sections, m.renderTabHeader())
@@ -1315,7 +1315,7 @@ func (m *Model) renderHelpDialog() string {
 
 	// 帮助内容
 	helpContent := []string{
-		titleStyle.Render("操作指南"),
+		titleStyle.Render("操作帮助"),
 		"",
 		sectionStyle.Render("鼠标操作"),
 		normalStyle.Render("  点击标签页        直接切换标签"),
