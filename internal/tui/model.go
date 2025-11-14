@@ -1052,8 +1052,10 @@ func (m *Model) renderTabHeader() string {
 }
 
 func (m *Model) renderProfileTab() string {
-	if m.profile == nil {
-		return ""
+	// 如果正在加载或者profile为空，显示加载状态
+	if m.loadingProfile || m.profile == nil {
+		loadingText := fmt.Sprintf("加载中... %s", m.spinner.View())
+		return loadingText
 	}
 
 	var lines []string
@@ -1307,7 +1309,7 @@ func (m *Model) renderHelpDialog() string {
 
 	// 帮助内容
 	helpContent := []string{
-		titleStyle.Render("操作帮助"),
+		titleStyle.Render("操作指南"),
 		"",
 		sectionStyle.Render("鼠标操作"),
 		normalStyle.Render("  点击标签页        直接切换标签"),
