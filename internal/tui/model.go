@@ -52,9 +52,11 @@ type Model struct {
 	spinner              spinner.Model
 	help                 help.Model
 	keys                 keyMap
-	profileViewport      viewport.Model
-	providersLoaded      bool
-	loadingProviders     bool
+	profileViewport         viewport.Model
+	providersLoaded         bool
+	loadingProviders        bool
+	loadingProfile          bool
+	manualRefreshingProfile bool
 }
 
 type providerState struct {
@@ -126,7 +128,7 @@ var keys = keyMap{
 	),
 	Tab1: key.NewBinding(
 		key.WithKeys("1"),
-		key.WithHelp("1", "个人资料"),
+		key.WithHelp("1", "用户资料"),
 	),
 	Tab2: key.NewBinding(
 		key.WithKeys("2"),
@@ -185,6 +187,8 @@ type errMsg struct {
 
 type clearStatusMsg struct{}
 
+type profileRefreshTickMsg struct{}
+
 // NewModel constructs the root Bubble Tea model.
 func NewModel(client *api.Client) *Model {
 	// 创建 spinner
@@ -211,7 +215,7 @@ func NewModel(client *api.Client) *Model {
 		keys:            keys,
 		profileViewport: vp,
 		ready:           true,
-		status:          "正在加载个人资料...",
+		loadingProfile:  true,
 	}
 }
 
@@ -220,6 +224,7 @@ func (m *Model) Init() tea.Cmd {
 	return tea.Batch(
 		loadProfileCmd(m.client),
 		m.spinner.Tick,
+		profileRefreshTicker(),
 	)
 }
 
@@ -239,7 +244,16 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case profileLoadedMsg:
 		m.profile = msg.profile
+		m.loadingProfile = false
+		m.manualRefreshingProfile = false
 		m.status = ""
+	case profileRefreshTickMsg:
+		// 只在profile tab时自动刷新（不显示loading）
+		if m.currentTab == tabProfile {
+			cmds = append(cmds, loadProfileCmd(m.client))
+		}
+		// 继续下一个tick
+		cmds = append(cmds, profileRefreshTicker())
 	case providersLoadedMsg:
 		m.providers = msg.response.Providers
 		m.providersLoaded = true
@@ -319,6 +333,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loadingProviders {
 			m.loadingProviders = false
 		}
+		// 如果是加载用户资料失败，重置加载状态
+		if m.loadingProfile {
+			m.loadingProfile = false
+			m.manualRefreshingProfile = false
+		}
 		cmds = append(cmds, clearStatusAfterDelay(3))
 	case clearStatusMsg:
 		m.status = ""
@@ -362,7 +381,11 @@ func (m *Model) View() string {
 
 	// 始终渲染状态栏区域，保持视图高度一致
 	statusText := ""
-	if m.status != "" {
+
+	// 如果正在手动刷新用户资料，显示刷新状态
+	if m.manualRefreshingProfile && m.currentTab == tabProfile {
+		statusText = fmt.Sprintf("刷新中... %s", m.spinner.View())
+	} else if m.status != "" {
 		statusText = m.status
 		// 如果状态消息表示正在进行中，添加 spinner
 		if strings.Contains(statusText, "中...") || strings.Contains(statusText, "加载") {
@@ -479,8 +502,8 @@ func (m *Model) moveSelection(delta int) tea.Cmd {
 }
 
 func (m *Model) refreshProfile() tea.Cmd {
-	m.profile = nil
-	m.status = "正在刷新个人资料..."
+	m.loadingProfile = true
+	m.manualRefreshingProfile = true
 	return loadProfileCmd(m.client)
 }
 
@@ -815,11 +838,11 @@ var (
 func (m *Model) renderTabHeader() string {
 	tabs := []string{}
 
-	// Tab 1: 个人资料
+	// Tab 1: 用户资料
 	if m.currentTab == tabProfile {
-		tabs = append(tabs, activeTabStyle.Render("1 个人资料"))
+		tabs = append(tabs, activeTabStyle.Render("1 用户资料"))
 	} else {
-		tabs = append(tabs, inactiveTabStyle.Render("1 个人资料"))
+		tabs = append(tabs, inactiveTabStyle.Render("1 用户资料"))
 	}
 
 	// Tab 2: 提供商
@@ -1058,6 +1081,12 @@ func updatePreferenceCmd(client *api.Client, preference string) tea.Cmd {
 func clearStatusAfterDelay(seconds int) tea.Cmd {
 	return tea.Tick(time.Duration(seconds)*time.Second, func(time.Time) tea.Msg {
 		return clearStatusMsg{}
+	})
+}
+
+func profileRefreshTicker() tea.Cmd {
+	return tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+		return profileRefreshTickMsg{}
 	})
 }
 
