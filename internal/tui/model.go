@@ -386,7 +386,7 @@ func (m *Model) View() string {
 		Foreground(mutedColor).
 		Width(m.width).
 		Align(lipgloss.Center)
-	sections = append(sections, helpHintStyle.Render("支持鼠标操作 · 输入 ? 查看操作帮助"))
+	sections = append(sections, helpHintStyle.Render("支持鼠标操作 · Enter 确认 · Esc 退出 · 输入 ? 查看完整操作指南"))
 
 	// 添加 tab header
 	sections = append(sections, m.renderTabHeader())
