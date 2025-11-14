@@ -537,15 +537,15 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	}
 
 	// sections 使用 "\n\n" 连接，所以每个section之间有空行
-	// Y=0: 标题, Y=1: 空行, Y=2: 帮助, Y=3: 空行, Y=4-6: 标签页（含上下padding）, Y=7: 空行, Y>=8: 内容
+	// Y=0: 标题, Y=1: 空行, Y=2: 帮助, Y=3: 空行, Y=4: 标签页, Y=5: 空行, Y>=6: 内容
 
-	// 点击标签页（Y=4-6，标签页有上下 padding 各 1 行）
-	if y >= 4 && y <= 6 {
+	// 点击标签页（Y=4）
+	if y == 4 {
 		return m.handleTabClick(x)
 	}
 
-	// 点击内容区域（Y>=8）
-	if y >= 8 {
+	// 点击内容区域（Y>=6）
+	if y >= 6 {
 		return m.handleContentClick(x, y)
 	}
 
@@ -570,23 +570,23 @@ func (m *Model) handleMouseWheel(delta int) tea.Cmd {
 
 func (m *Model) handleTabClick(x int) tea.Cmd {
 	// 计算标签页位置（中文字符占2列宽）
-	// "1 用户资料" with padding(0,3) + margin(1) = 17 chars
-	// "2 提供商" with padding(0,3) + margin(1) = 15 chars
-	// "3 余额使用偏好" with padding(0,3) + margin(1) = 21 chars
+	// "1. 用户资料" with padding(0,1) + margin(1) = 14 chars
+	// "2. 提供商" with padding(0,1) + margin(1) = 12 chars
+	// "3. 余额使用偏好" with padding(0,1) + margin(1) = 18 chars
 
-	// Tab 1: 0-16
-	// Tab 2: 17-31
-	// Tab 3: 32-52
+	// Tab 1: 0-13
+	// Tab 2: 14-25
+	// Tab 3: 26-43
 
-	if x < 17 {
+	if x < 14 {
 		// 点击标签1
 		m.currentTab = tabProfile
-	} else if x < 32 {
+	} else if x < 26 {
 		// 点击标签2
 		m.currentTab = tabProviders
 		m.focus = focusProviders
 		return m.ensureProvidersLoaded()
-	} else if x < 53 {
+	} else if x < 44 {
 		// 点击标签3
 		m.currentTab = tabBalancePreference
 		m.syncBalancePreferenceIdx()
@@ -595,7 +595,7 @@ func (m *Model) handleTabClick(x int) tea.Cmd {
 }
 
 func (m *Model) handleContentClick(x, y int) tea.Cmd {
-	// 内容区从 Y=6 开始
+	// 内容区从 Y=6 开始（标签页在Y=4，空行在Y=5）
 	contentY := y - 6
 
 	if m.currentTab == tabProviders {
@@ -1022,8 +1022,8 @@ var (
 	helpStyle         = lipgloss.NewStyle().Foreground(mutedColor)
 	statusStyle       = lipgloss.NewStyle().Foreground(primaryColor)
 	selectedItemStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(1, 3).MarginRight(1)
-	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(1, 3).MarginRight(1)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(0, 1).MarginRight(1)
+	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 1).MarginRight(1)
 )
 
 func (m *Model) renderTabHeader() string {
@@ -1031,23 +1031,23 @@ func (m *Model) renderTabHeader() string {
 
 	// Tab 1: 用户资料
 	if m.currentTab == tabProfile {
-		tabs = append(tabs, activeTabStyle.Render("1 用户资料"))
+		tabs = append(tabs, activeTabStyle.Render("1. 用户资料"))
 	} else {
-		tabs = append(tabs, inactiveTabStyle.Render("1 用户资料"))
+		tabs = append(tabs, inactiveTabStyle.Render("1. 用户资料"))
 	}
 
 	// Tab 2: 提供商
 	if m.currentTab == tabProviders {
-		tabs = append(tabs, activeTabStyle.Render("2 提供商"))
+		tabs = append(tabs, activeTabStyle.Render("2. 提供商"))
 	} else {
-		tabs = append(tabs, inactiveTabStyle.Render("2 提供商"))
+		tabs = append(tabs, inactiveTabStyle.Render("2. 提供商"))
 	}
 
 	// Tab 3: 余额使用偏好
 	if m.currentTab == tabBalancePreference {
-		tabs = append(tabs, activeTabStyle.Render("3 余额使用偏好"))
+		tabs = append(tabs, activeTabStyle.Render("3. 余额使用偏好"))
 	} else {
-		tabs = append(tabs, inactiveTabStyle.Render("3 余额使用偏好"))
+		tabs = append(tabs, inactiveTabStyle.Render("3. 余额使用偏好"))
 	}
 
 	tabsRow := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
