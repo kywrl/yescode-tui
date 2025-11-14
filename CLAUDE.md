@@ -16,16 +16,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build the binary
-go build -o yc ./cmd/yescode
+go build -o yc ./cmd/yc
 
 # Run directly
-go run ./cmd/yescode --api-key YOUR_KEY
+go run ./cmd/yc --api-key YOUR_KEY
 
 # Run with custom API endpoint
-go run ./cmd/yescode --api-key YOUR_KEY --base-url https://custom.api.url
+go run ./cmd/yc --api-key YOUR_KEY --base-url https://custom.api.url
 
-# Install to GOPATH/bin
-go install ./cmd/yescode
+# Install to GOPATH/bin (installs as 'yc' command)
+go install ./cmd/yc
 
 # Format code
 go fmt ./...
@@ -46,7 +46,7 @@ go test -race ./...
 
 The codebase follows a clean, layered architecture with three main components:
 
-### 1. Entry Point (`cmd/yescode/main.go`)
+### 1. Entry Point (`cmd/yc/main.go`)
 - Parses CLI flags (`--api-key`, `--base-url`)
 - Reads API key from CLI flag or `YESCODE_API_KEY` environment variable
 - Initializes API client with optional configuration
