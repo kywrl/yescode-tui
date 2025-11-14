@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Build the binary
-go build -o yescode ./cmd/yescode
+go build -o yc ./cmd/yescode
 
 # Run directly
 go run ./cmd/yescode --api-key YOUR_KEY
