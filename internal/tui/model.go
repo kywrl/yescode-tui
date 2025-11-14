@@ -1052,10 +1052,16 @@ func (m *Model) renderTabHeader() string {
 }
 
 func (m *Model) renderProfileTab() string {
-	// 如果正在加载或者profile为空，显示加载状态
-	if m.loadingProfile || m.profile == nil {
+	// 只在首次加载（profile为空且不是手动刷新）时显示内容区加载状态
+	// 手动刷新时在状态栏显示，内容区保持不变
+	if m.profile == nil && !m.manualRefreshingProfile {
 		loadingText := fmt.Sprintf("加载中... %s", m.spinner.View())
 		return loadingText
+	}
+
+	// 如果profile还是nil（不应该发生，但防御性处理）
+	if m.profile == nil {
+		return ""
 	}
 
 	var lines []string
