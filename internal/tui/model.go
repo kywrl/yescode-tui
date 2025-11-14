@@ -977,7 +977,7 @@ func translateSourceLabel(source string) string {
 	switch source {
 	case "subscription":
 		return "订阅"
-	case "pay_as_you_go":
+	case "pay_as_you_go", "payg":
 		return "按需"
 	default:
 		return source
@@ -985,12 +985,8 @@ func translateSourceLabel(source string) string {
 }
 
 func translateProviderDisplayName(name string) string {
-	switch name {
-	case "PAYGO APIs (payg)":
-		return "PAYGO APIs (按需)"
-	default:
-		return name
-	}
+	// 不翻译提供商名称，保持原样
+	return name
 }
 
 func formatTypeSuffix(providerType string) string {
