@@ -31,27 +31,60 @@ const (
 	tabBalancePreference
 )
 
+// UI layout constants
+const (
+	defaultViewportHeight  = 20
+	defaultPanelHeight     = 10
+	minPanelWidth          = 30
+	viewportWidthMargin    = 4
+	profileRefreshInterval = 5 * time.Second
+	statusClearDelay       = 2 * time.Second
+	errorClearDelay        = 3 * time.Second
+)
+
+// UI element positions (calculated relative to View() output)
+type uiLayout struct {
+	titleLineY        int // Title line Y position
+	helpLineY         int // Help hint line Y position
+	tabHeaderY        int // Tab header line Y position
+	contentStartY     int // Content area start Y position
+	panelInnerOffsetY int // Y offset for panel inner content (border + padding)
+	panelInnerOffsetX int // X offset for panel inner content (border + padding)
+}
+
+// getUILayout calculates UI element positions based on View() structure.
+func getUILayout() uiLayout {
+	return uiLayout{
+		titleLineY:        0, // Title at Y=0
+		helpLineY:         2, // Help hint at Y=2 (title + blank line)
+		tabHeaderY:        4, // Tab header at Y=4 (title + blank + help + blank)
+		contentStartY:     6, // Content starts at Y=6 (after tab header + blank)
+		panelInnerOffsetY: 2, // Panel has 1 line border + 1 line padding
+		panelInnerOffsetX: 3, // Panel has left border (1) + left padding (2)
+	}
+}
+
 // Model wires Bubble Tea with the YesCode API client.
 type Model struct {
 	client *api.Client
 
-	profile              *api.Profile
-	providers            []api.ProviderBucket
-	providerIdx          int
-	altIdx               int
-	balancePreferenceIdx int
-	focus                focusArea
-	currentTab           tabIndex
-	ready                bool
-	status               string
-	err                  error
-	width                int
-	height               int
-	providerData         map[int]*providerState
-	preferenceSwitching  bool
-	spinner              spinner.Model
-	help                 help.Model
-	keys                 keyMap
+	profile                 *api.Profile
+	providers               []api.ProviderBucket
+	providerIdx             int
+	altIdx                  int
+	balancePreferenceIdx    int
+	focus                   focusArea
+	currentTab              tabIndex
+	ready                   bool
+	status                  string
+	err                     error
+	width                   int
+	height                  int
+	providerData            map[int]*providerState
+	preferenceSwitching     bool
+	spinner                 spinner.Model
+	help                    help.Model
+	keys                    keyMap
 	profileViewport         viewport.Model
 	providersLoaded         bool
 	loadingProviders        bool
@@ -215,7 +248,7 @@ func NewModel(client *api.Client) *Model {
 	h.Styles.FullDesc = helpStyle
 
 	// 创建 viewport
-	vp := viewport.New(0, 20)
+	vp := viewport.New(0, defaultViewportHeight)
 
 	return &Model{
 		client:          client,
@@ -245,119 +278,37 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.help.Width = msg.Width
+		m.handleWindowResize(msg)
 	case tea.KeyMsg:
-		cmd := m.handleKey(msg)
-		if cmd != nil {
+		if cmd := m.handleKey(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case tea.MouseMsg:
-		cmd := m.handleMouse(msg)
-		if cmd != nil {
+		if cmd := m.handleMouse(msg); cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 	case profileLoadedMsg:
-		m.profile = msg.profile
-		m.loadingProfile = false
-		m.manualRefreshingProfile = false
-		m.status = ""
+		m.handleProfileLoaded(msg)
 	case profileRefreshTickMsg:
-		// 只在profile tab时自动刷新（不显示loading）
-		if m.currentTab == tabProfile {
-			cmds = append(cmds, loadProfileCmd(m.client))
-		}
-		// 继续下一个tick
-		cmds = append(cmds, profileRefreshTicker())
+		cmds = append(cmds, m.handleProfileRefreshTick()...)
 	case providersLoadedMsg:
-		m.providers = msg.response.Providers
-		m.providersLoaded = true
-		m.loadingProviders = false
-		if m.providerIdx >= len(m.providers) {
-			m.providerIdx = 0
-		}
-		// 立即清除加载状态消息
-		if strings.Contains(m.status, "加载提供商列表中") {
-			m.status = ""
-		}
-		if len(m.providers) > 0 {
-			cmds = append(cmds, m.queueProviderDetailLoad(m.currentProviderID()))
-		}
+		cmds = append(cmds, m.handleProvidersLoaded(msg)...)
 	case alternativesLoadedMsg:
-		state := m.ensureProviderState(msg.providerID)
-		state.alternatives = msg.alternatives
-		state.alternativesLoaded = true
-		state.loadingAlternatives = false
-		state.lastError = nil
-		m.syncAltIdx(msg.providerID)
-		// 检查是否所有加载都完成，立即清除加载状态消息
-		if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
-			m.status = ""
-		}
+		m.handleAlternativesLoaded(msg)
 	case selectionLoadedMsg:
-		state := m.ensureProviderState(msg.providerID)
-		state.selection = msg.selection
-		state.selectionLoaded = true
-		state.loadingSelection = false
-		state.lastError = nil
-		m.syncAltIdx(msg.providerID)
-		// 检查是否所有加载都完成，立即清除加载状态消息
-		if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
-			m.status = ""
-		}
+		m.handleSelectionLoaded(msg)
 	case switchCompletedMsg:
-		state := m.ensureProviderState(msg.providerID)
-		state.selection = msg.selection
-		state.selectionLoaded = true
-		state.switching = false
-		state.lastError = nil
-		m.syncAltIdx(msg.providerID)
-		m.status = fmt.Sprintf("已切换到 %s", msg.selection.SelectedAlternative.DisplayName)
-		cmds = append(cmds, clearStatusAfterDelay(2))
+		cmds = append(cmds, m.handleSwitchCompleted(msg)...)
 	case preferenceUpdatedMsg:
-		if m.profile != nil {
-			m.profile.BalancePreference = msg.preference
-		}
-		m.preferenceSwitching = false
-		m.syncBalancePreferenceIdx()
-		m.status = fmt.Sprintf("余额偏好已切换为 %s", describePreference(msg.preference))
-		cmds = append(cmds, clearStatusAfterDelay(2))
+		cmds = append(cmds, m.handlePreferenceUpdated(msg)...)
 	case preferenceFailedMsg:
-		m.preferenceSwitching = false
-		m.err = msg.err
-		m.status = fmt.Sprintf("余额偏好切换失败: %v", msg.err)
-		cmds = append(cmds, clearStatusAfterDelay(3))
+		cmds = append(cmds, m.handlePreferenceFailed(msg)...)
 	case providerLoadFailedMsg:
-		state := m.ensureProviderState(msg.providerID)
-		switch msg.target {
-		case "alternatives":
-			state.loadingAlternatives = false
-		case "selection":
-			state.loadingSelection = false
-		case "switch":
-			state.switching = false
-		}
-		state.lastError = msg.err
-		m.err = msg.err
-		m.status = fmt.Sprintf("提供商 %d: %v", msg.providerID, msg.err)
-		cmds = append(cmds, clearStatusAfterDelay(3))
+		cmds = append(cmds, m.handleProviderLoadFailed(msg)...)
 	case errMsg:
-		m.err = msg.err
-		m.status = msg.err.Error()
-		// 如果是加载提供商失败，重置加载状态
-		if m.loadingProviders {
-			m.loadingProviders = false
-		}
-		// 如果是加载用户资料失败，重置加载状态
-		if m.loadingProfile {
-			m.loadingProfile = false
-			m.manualRefreshingProfile = false
-		}
-		cmds = append(cmds, clearStatusAfterDelay(3))
+		cmds = append(cmds, m.handleError(msg)...)
 	case clearStatusMsg:
-		m.status = ""
-		m.err = nil
+		m.handleClearStatus()
 	}
 
 	// 更新 spinner
@@ -366,6 +317,156 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	cmds = append(cmds, cmd)
 
 	return m, tea.Batch(cmds...)
+}
+
+// handleWindowResize updates dimensions when the window is resized.
+func (m *Model) handleWindowResize(msg tea.WindowSizeMsg) {
+	m.width = msg.Width
+	m.height = msg.Height
+	m.help.Width = msg.Width
+}
+
+// handleProfileLoaded processes successful profile load.
+func (m *Model) handleProfileLoaded(msg profileLoadedMsg) {
+	m.profile = msg.profile
+	m.loadingProfile = false
+	m.manualRefreshingProfile = false
+	m.status = ""
+}
+
+// handleProfileRefreshTick handles periodic profile refresh.
+func (m *Model) handleProfileRefreshTick() []tea.Cmd {
+	var cmds []tea.Cmd
+	// 只在profile tab时自动刷新（不显示loading）
+	if m.currentTab == tabProfile {
+		cmds = append(cmds, loadProfileCmd(m.client))
+	}
+	// 继续下一个tick
+	cmds = append(cmds, profileRefreshTicker())
+	return cmds
+}
+
+// handleProvidersLoaded processes provider list load.
+func (m *Model) handleProvidersLoaded(msg providersLoadedMsg) []tea.Cmd {
+	var cmds []tea.Cmd
+	m.providers = msg.response.Providers
+	m.providersLoaded = true
+	m.loadingProviders = false
+
+	if m.providerIdx >= len(m.providers) {
+		m.providerIdx = 0
+	}
+
+	// 立即清除加载状态消息
+	if strings.Contains(m.status, "加载提供商列表中") {
+		m.status = ""
+	}
+
+	if len(m.providers) > 0 {
+		cmds = append(cmds, m.queueProviderDetailLoad(m.currentProviderID()))
+	}
+	return cmds
+}
+
+// handleAlternativesLoaded processes alternatives load.
+func (m *Model) handleAlternativesLoaded(msg alternativesLoadedMsg) {
+	state := m.ensureProviderState(msg.providerID)
+	state.alternatives = msg.alternatives
+	state.alternativesLoaded = true
+	state.loadingAlternatives = false
+	state.lastError = nil
+	m.syncAltIdx(msg.providerID)
+
+	// 检查是否所有加载都完成，立即清除加载状态消息
+	if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
+		m.status = ""
+	}
+}
+
+// handleSelectionLoaded processes selection load.
+func (m *Model) handleSelectionLoaded(msg selectionLoadedMsg) {
+	state := m.ensureProviderState(msg.providerID)
+	state.selection = msg.selection
+	state.selectionLoaded = true
+	state.loadingSelection = false
+	state.lastError = nil
+	m.syncAltIdx(msg.providerID)
+
+	// 检查是否所有加载都完成，立即清除加载状态消息
+	if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
+		m.status = ""
+	}
+}
+
+// handleSwitchCompleted processes provider switch completion.
+func (m *Model) handleSwitchCompleted(msg switchCompletedMsg) []tea.Cmd {
+	state := m.ensureProviderState(msg.providerID)
+	state.selection = msg.selection
+	state.selectionLoaded = true
+	state.switching = false
+	state.lastError = nil
+	m.syncAltIdx(msg.providerID)
+	m.status = fmt.Sprintf("已切换到 %s", msg.selection.SelectedAlternative.DisplayName)
+	return []tea.Cmd{clearStatusAfter(statusClearDelay)}
+}
+
+// handlePreferenceUpdated processes preference update success.
+func (m *Model) handlePreferenceUpdated(msg preferenceUpdatedMsg) []tea.Cmd {
+	if m.profile != nil {
+		m.profile.BalancePreference = msg.preference
+	}
+	m.preferenceSwitching = false
+	m.syncBalancePreferenceIdx()
+	m.status = fmt.Sprintf("余额偏好已切换为 %s", describePreference(msg.preference))
+	return []tea.Cmd{clearStatusAfter(statusClearDelay)}
+}
+
+// handlePreferenceFailed processes preference update failure.
+func (m *Model) handlePreferenceFailed(msg preferenceFailedMsg) []tea.Cmd {
+	m.preferenceSwitching = false
+	m.err = msg.err
+	m.status = fmt.Sprintf("余额偏好切换失败: %v", msg.err)
+	return []tea.Cmd{clearStatusAfter(errorClearDelay)}
+}
+
+// handleProviderLoadFailed processes provider load failures.
+func (m *Model) handleProviderLoadFailed(msg providerLoadFailedMsg) []tea.Cmd {
+	state := m.ensureProviderState(msg.providerID)
+	switch msg.target {
+	case "alternatives":
+		state.loadingAlternatives = false
+	case "selection":
+		state.loadingSelection = false
+	case "switch":
+		state.switching = false
+	}
+	state.lastError = msg.err
+	m.err = msg.err
+	m.status = fmt.Sprintf("提供商 %d: %v", msg.providerID, msg.err)
+	return []tea.Cmd{clearStatusAfter(errorClearDelay)}
+}
+
+// handleError processes general errors.
+func (m *Model) handleError(msg errMsg) []tea.Cmd {
+	m.err = msg.err
+	m.status = msg.err.Error()
+
+	// 如果是加载提供商失败，重置加载状态
+	if m.loadingProviders {
+		m.loadingProviders = false
+	}
+	// 如果是加载用户资料失败，重置加载状态
+	if m.loadingProfile {
+		m.loadingProfile = false
+		m.manualRefreshingProfile = false
+	}
+	return []tea.Cmd{clearStatusAfter(errorClearDelay)}
+}
+
+// handleClearStatus clears status and error messages.
+func (m *Model) handleClearStatus() {
+	m.status = ""
+	m.err = nil
 }
 
 // View renders the TUI.
@@ -428,12 +529,47 @@ func (m *Model) View() string {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
-	switch msg.Type {
-	case tea.KeyCtrlC:
+	// Handle Ctrl+C first
+	if msg.Type == tea.KeyCtrlC {
 		return tea.Quit
 	}
 
-	switch msg.String() {
+	key := msg.String()
+
+	// Handle quit and help
+	if cmd := m.handleQuitAndHelp(key); cmd != nil {
+		return cmd
+	}
+
+	// Handle tab switching
+	if cmd := m.handleTabSwitch(key); cmd != nil {
+		return cmd
+	}
+
+	// Handle focus switching (left/right)
+	m.handleFocusSwitch(key)
+
+	// Handle refresh
+	if cmd := m.handleRefresh(key); cmd != nil {
+		return cmd
+	}
+
+	// Handle enter
+	if cmd := m.handleEnter(key); cmd != nil {
+		return cmd
+	}
+
+	// Handle navigation (up/down)
+	if cmd := m.handleNavigation(key); cmd != nil {
+		return cmd
+	}
+
+	return nil
+}
+
+// handleQuitAndHelp handles Esc and ? keys.
+func (m *Model) handleQuitAndHelp(key string) tea.Cmd {
+	switch key {
 	case "esc":
 		// 如果帮助对话框打开，关闭它；否则退出程序
 		if m.showHelpDialog {
@@ -445,8 +581,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		// 切换帮助对话框显示状态
 		m.showHelpDialog = !m.showHelpDialog
 		return nil
+	}
+	return nil
+}
+
+// handleTabSwitch handles tab switching keys (1, 2, 3, tab, shift+tab).
+func (m *Model) handleTabSwitch(key string) tea.Cmd {
+	switch key {
 	case "1":
 		m.currentTab = tabProfile
+		return nil
 	case "2":
 		m.currentTab = tabProviders
 		m.focus = focusProviders
@@ -454,72 +598,116 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "3":
 		m.currentTab = tabBalancePreference
 		m.syncBalancePreferenceIdx()
+		return nil
 	case "tab":
-		// Tab 键切换到下一个 tab
-		m.currentTab = (m.currentTab + 1) % 3
-		if m.currentTab == tabProviders {
-			m.focus = focusProviders
-			return m.ensureProvidersLoaded()
-		} else if m.currentTab == tabBalancePreference {
-			m.syncBalancePreferenceIdx()
-		}
+		return m.switchToNextTab()
 	case "shift+tab":
-		// Shift+Tab 键切换到上一个 tab
-		m.currentTab = (m.currentTab - 1 + 3) % 3
-		if m.currentTab == tabProviders {
-			m.focus = focusProviders
-			return m.ensureProvidersLoaded()
-		} else if m.currentTab == tabBalancePreference {
-			m.syncBalancePreferenceIdx()
-		}
-	case "left", "h":
-		if m.currentTab == tabProviders {
-			m.focus = focusProviders
-		}
-	case "right", "l":
-		if m.currentTab == tabProviders {
-			m.focus = focusAlternatives
-			// 切换到右栏时，同步游标到当前激活项
-			m.syncAltIdx(m.currentProviderID())
-		}
-	case "r":
-		if m.currentTab == tabProfile {
-			return m.refreshProfile()
-		} else if m.currentTab == tabProviders {
-			return m.refreshCurrentProvider()
-		}
-	case "enter":
-		if m.currentTab == tabProviders && m.focus == focusAlternatives {
-			return m.switchSelection()
-		} else if m.currentTab == tabBalancePreference {
-			return m.toggleBalancePreference()
-		}
-	case "up", "k":
-		if m.currentTab == tabProfile {
-			m.profileViewport.LineUp(1)
-			return nil
-		} else if m.currentTab == tabBalancePreference {
-			// 余额偏好tab：在两个选项之间移动
-			if m.balancePreferenceIdx > 0 {
-				m.balancePreferenceIdx--
-			}
-			return nil
-		}
-		return m.moveSelection(-1)
-	case "down", "j":
-		if m.currentTab == tabProfile {
-			m.profileViewport.LineDown(1)
-			return nil
-		} else if m.currentTab == tabBalancePreference {
-			// 余额偏好tab：在两个选项之间移动
-			if m.balancePreferenceIdx < 1 {
-				m.balancePreferenceIdx++
-			}
-			return nil
-		}
-		return m.moveSelection(1)
+		return m.switchToPrevTab()
 	}
 	return nil
+}
+
+// switchToNextTab switches to the next tab.
+func (m *Model) switchToNextTab() tea.Cmd {
+	m.currentTab = (m.currentTab + 1) % 3
+	return m.handleTabChanged()
+}
+
+// switchToPrevTab switches to the previous tab.
+func (m *Model) switchToPrevTab() tea.Cmd {
+	m.currentTab = (m.currentTab - 1 + 3) % 3
+	return m.handleTabChanged()
+}
+
+// handleTabChanged handles post-tab-switch logic.
+func (m *Model) handleTabChanged() tea.Cmd {
+	if m.currentTab == tabProviders {
+		m.focus = focusProviders
+		return m.ensureProvidersLoaded()
+	} else if m.currentTab == tabBalancePreference {
+		m.syncBalancePreferenceIdx()
+	}
+	return nil
+}
+
+// handleFocusSwitch handles left/right focus switching.
+func (m *Model) handleFocusSwitch(key string) {
+	if m.currentTab != tabProviders {
+		return
+	}
+
+	switch key {
+	case "left", "h":
+		m.focus = focusProviders
+	case "right", "l":
+		m.focus = focusAlternatives
+		// 切换到右栏时，同步游标到当前激活项
+		m.syncAltIdx(m.currentProviderID())
+	}
+}
+
+// handleRefresh handles refresh key (r).
+func (m *Model) handleRefresh(key string) tea.Cmd {
+	if key != "r" {
+		return nil
+	}
+
+	switch m.currentTab {
+	case tabProfile:
+		return m.refreshProfile()
+	case tabProviders:
+		return m.refreshCurrentProvider()
+	}
+	return nil
+}
+
+// handleEnter handles enter key actions.
+func (m *Model) handleEnter(key string) tea.Cmd {
+	if key != "enter" {
+		return nil
+	}
+
+	switch m.currentTab {
+	case tabProviders:
+		if m.focus == focusAlternatives {
+			return m.switchSelection()
+		}
+	case tabBalancePreference:
+		return m.toggleBalancePreference()
+	}
+	return nil
+}
+
+// handleNavigation handles up/down navigation keys.
+func (m *Model) handleNavigation(key string) tea.Cmd {
+	delta := 0
+	switch key {
+	case "up", "k":
+		delta = -1
+	case "down", "j":
+		delta = 1
+	default:
+		return nil
+	}
+
+	// Profile tab: scroll viewport
+	if m.currentTab == tabProfile {
+		if delta < 0 {
+			m.profileViewport.LineUp(1)
+		} else {
+			m.profileViewport.LineDown(1)
+		}
+		return nil
+	}
+
+	// Balance preference tab: move between two options
+	if m.currentTab == tabBalancePreference {
+		m.balancePreferenceIdx = clampIndex(m.balancePreferenceIdx+delta, 2)
+		return nil
+	}
+
+	// Providers tab: move selection
+	return m.moveSelection(delta)
 }
 
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
@@ -538,16 +726,15 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	// sections 使用 "\n\n" 连接，所以每个section之间有空行
-	// Y=0: 标题, Y=1: 空行, Y=2: 帮助, Y=3: 空行, Y=4: 标签页, Y=5: 空行, Y>=6: 内容
+	layout := getUILayout()
 
-	// 点击标签页（Y=4）
-	if y == 4 {
+	// 点击标签页
+	if y == layout.tabHeaderY {
 		return m.handleTabClick(x)
 	}
 
-	// 点击内容区域（Y>=6）
-	if y >= 6 {
+	// 点击内容区域
+	if y >= layout.contentStartY {
 		return m.handleContentClick(x, y)
 	}
 
@@ -571,25 +758,26 @@ func (m *Model) handleMouseWheel(delta int) tea.Cmd {
 }
 
 func (m *Model) handleTabClick(x int) tea.Cmd {
-	// 计算标签页位置（中文字符占2列宽）
-	// "1. 用户资料" with padding(0,2) + margin(1) = 16 chars
-	// "2. 提供商" with padding(0,2) + margin(1) = 14 chars
-	// "3. 余额使用偏好" with padding(0,2) + margin(1) = 20 chars
+	// 计算标签页位置
+	// 使用 lipgloss 的宽度计算，更准确地处理中文字符
+	tab1Text := "1. 用户资料"
+	tab2Text := "2. 提供商"
 
-	// Tab 1: 0-15
-	// Tab 2: 16-29
-	// Tab 3: 30-49
+	// activeTabStyle: padding(0,2) + marginRight(1)
+	// 中文字符通常占 2 个宽度单位
+	tab1Width := lipgloss.Width(activeTabStyle.Render(tab1Text))
+	tab2Width := lipgloss.Width(activeTabStyle.Render(tab2Text))
 
-	if x < 16 {
-		// 点击标签1
+	tab1End := tab1Width
+	tab2End := tab1End + tab2Width
+
+	if x < tab1End {
 		m.currentTab = tabProfile
-	} else if x < 30 {
-		// 点击标签2
+	} else if x < tab2End {
 		m.currentTab = tabProviders
 		m.focus = focusProviders
 		return m.ensureProvidersLoaded()
-	} else if x < 50 {
-		// 点击标签3
+	} else {
 		m.currentTab = tabBalancePreference
 		m.syncBalancePreferenceIdx()
 	}
@@ -597,12 +785,13 @@ func (m *Model) handleTabClick(x int) tea.Cmd {
 }
 
 func (m *Model) handleContentClick(x, y int) tea.Cmd {
-	// 内容区从 Y=6 开始（标签页在Y=4，空行在Y=5）
-	contentY := y - 6
+	layout := getUILayout()
+	contentY := y - layout.contentStartY
 
-	if m.currentTab == tabProviders {
+	switch m.currentTab {
+	case tabProviders:
 		return m.handleProvidersClick(x, contentY)
-	} else if m.currentTab == tabBalancePreference {
+	case tabBalancePreference:
 		return m.handleBalancePreferenceClick(contentY)
 	}
 	return nil
@@ -613,11 +802,11 @@ func (m *Model) handleProvidersClick(x, contentY int) tea.Cmd {
 		return nil
 	}
 
-	// 简化判断：左右面板以屏幕中心分界
-	// 面板内部有上 padding(1) + 顶部边框(1)，所以列表项从相对位置2开始
-	// contentY 是相对于内容区的偏移，需要考虑面板的内边距
-	listItemY := contentY - 2 // 减去顶部边框(1) + 上padding(1)
+	layout := getUILayout()
+	// 面板内部列表项的 Y 位置需要减去面板的边框和内边距
+	listItemY := contentY - layout.panelInnerOffsetY
 
+	// 左右面板以屏幕中心分界
 	if x < m.width/2 {
 		// 点击左侧提供商列表
 		m.focus = focusProviders
@@ -644,18 +833,22 @@ func (m *Model) handleProvidersClick(x, contentY int) tea.Cmd {
 }
 
 func (m *Model) handleBalancePreferenceClick(contentY int) tea.Cmd {
-	// contentY=0: 优先订阅（选项0）
-	// contentY=1-2: 优先订阅的说明文字
-	// contentY=3: 空行
-	// contentY=4: 仅按需付费（选项1）
-	// contentY=5-6: 仅按需付费的说明文字
+	// 余额偏好页面布局：
+	// 第一个选项：包括标题行(0) + 两行说明(1-2)
+	// 空行(3)
+	// 第二个选项：包括标题行(4) + 两行说明(5-6)
+
+	const (
+		option1Start = 0
+		option1End   = 2
+		option2Start = 4
+		option2End   = 6
+	)
 
 	var targetIdx int
-	if contentY >= 0 && contentY <= 2 {
-		// 点击了优先订阅区域
+	if contentY >= option1Start && contentY <= option1End {
 		targetIdx = 0
-	} else if contentY >= 4 && contentY <= 6 {
-		// 点击了仅按需付费区域
+	} else if contentY >= option2Start && contentY <= option2End {
 		targetIdx = 1
 	} else {
 		return nil
@@ -864,7 +1057,7 @@ func clampIndex(idx, length int) int {
 
 // contentHeight 返回内容区域的固定高度
 func (m *Model) contentHeight() int {
-	return 20
+	return defaultViewportHeight
 }
 
 func (m *Model) renderPanels() string {
@@ -907,7 +1100,7 @@ func (m *Model) renderProvidersPanel() string {
 	if m.focus == focusProviders {
 		style = style.Copy().BorderStyle(activeBorder).BorderForeground(primaryColor)
 	}
-	return style.Width(m.panelWidth()).Height(10).Render(content)
+	return style.Width(m.panelWidth()).Height(defaultPanelHeight).Render(content)
 }
 
 func (m *Model) renderAlternativesPanel() string {
@@ -962,7 +1155,7 @@ func (m *Model) renderAlternativesPanel() string {
 	if m.focus == focusAlternatives {
 		style = style.Copy().BorderStyle(activeBorder).BorderForeground(primaryColor)
 	}
-	return style.Width(m.panelWidth()).Height(10).Render(content)
+	return style.Width(m.panelWidth()).Height(defaultPanelHeight).Render(content)
 }
 
 func (m *Model) panelWidth() int {
@@ -970,8 +1163,8 @@ func (m *Model) panelWidth() int {
 		return 50
 	}
 	w := m.width/2 - 3
-	if w < 30 {
-		return 30
+	if w < minPanelWidth {
+		return minPanelWidth
 	}
 	return w
 }
@@ -1006,11 +1199,6 @@ func formatTypeSuffix(providerType string) string {
 		return ""
 	}
 	return fmt.Sprintf(" [%s]", providerType)
-}
-
-func formatAlternativeTypeSuffix(providerType string) string {
-	// 不再显示类型后缀
-	return ""
 }
 
 var (
@@ -1066,8 +1254,7 @@ func (m *Model) renderProfileTab() string {
 	// 只在首次加载（profile为空且不是手动刷新）时显示内容区加载状态
 	// 手动刷新时在状态栏显示，内容区保持不变
 	if m.profile == nil && !m.manualRefreshingProfile {
-		loadingText := fmt.Sprintf("加载中... %s", m.spinner.View())
-		return loadingText
+		return fmt.Sprintf("加载中... %s", m.spinner.View())
 	}
 
 	// 如果profile还是nil（不应该发生，但防御性处理）
@@ -1075,88 +1262,116 @@ func (m *Model) renderProfileTab() string {
 		return ""
 	}
 
+	// 构建内容
 	var lines []string
-
-	// Material Design 风格标题
-	lines = append(lines, titleStyle.Render("账户信息"))
-	lines = append(lines, fmt.Sprintf("  用户名：%s", m.profile.Username))
-	lines = append(lines, fmt.Sprintf("  邮箱：%s", m.profile.Email))
+	lines = append(lines, m.renderAccountInfo()...)
 	lines = append(lines, "")
+	lines = append(lines, m.renderBalanceOverview()...)
 
-	// 余额概览
-	lines = append(lines, titleStyle.Render("余额概览"))
-	lines = append(lines, fmt.Sprintf("  ● 订阅余额：$%.2f", m.profile.SubscriptionBalance))
-	lines = append(lines, fmt.Sprintf("  ● 按需余额：$%.2f", m.profile.PayAsYouGoBalance))
-	lines = append(lines, fmt.Sprintf("  ● 总余额：$%.2f", m.profile.Balance))
-	lines = append(lines, fmt.Sprintf("  ● 余额偏好：%s", describePreference(m.profile.BalancePreference)))
-
-	// 订阅计划（如果存在）
 	if m.profile.SubscriptionPlan.Name != "" {
 		lines = append(lines, "")
-		lines = append(lines, titleStyle.Render("订阅计划"))
-		plan := m.profile.SubscriptionPlan
-		lines = append(lines, fmt.Sprintf("  ● 计划：%s ($%.2f)", plan.Name, plan.Price))
-
-		// 优化截止日期显示
-		if m.profile.SubscriptionExpiry != "" {
-			expiryDate := m.formatDate(m.profile.SubscriptionExpiry)
-			lines = append(lines, fmt.Sprintf("  ● 到期：%s", expiryDate))
-		}
-
-		lines = append(lines, fmt.Sprintf("  ● 每日额度：$%.2f", plan.DailyBalance))
-
-		// 本周消费（带百分比）
-		weekPercent := 0.0
-		if plan.WeeklyLimit > 0 {
-			weekPercent = (m.profile.CurrentWeekSpend / plan.WeeklyLimit) * 100
-		}
-		lines = append(lines, fmt.Sprintf("  ● 本周：$%.2f / $%.2f (%.1f%%)",
-			m.profile.CurrentWeekSpend, plan.WeeklyLimit, weekPercent))
-
-		// 本月消费（带百分比）
-		monthPercent := 0.0
-		if plan.MonthlySpendLimit > 0 {
-			monthPercent = (m.profile.CurrentMonthSpend / plan.MonthlySpendLimit) * 100
-		}
-		lines = append(lines, fmt.Sprintf("  ● 本月：$%.2f / $%.2f (%.1f%%)",
-			m.profile.CurrentMonthSpend, plan.MonthlySpendLimit, monthPercent))
+		lines = append(lines, m.renderSubscriptionPlan()...)
 	} else {
-		// 如果没有订阅计划，仍然显示消费统计
 		lines = append(lines, "")
-		lines = append(lines, titleStyle.Render("消费统计"))
-		lines = append(lines, fmt.Sprintf("  ● 本周消费：$%.2f", m.profile.CurrentWeekSpend))
-		lines = append(lines, fmt.Sprintf("  ● 本月消费：$%.2f", m.profile.CurrentMonthSpend))
+		lines = append(lines, m.renderSpendingStats()...)
 	}
 
 	content := strings.Join(lines, "\n")
+	m.setupProfileViewport(content)
 
-	// 更新 viewport 的内容和尺寸
-	m.profileViewport.SetContent(content)
-	m.profileViewport.Height = m.contentHeight()
-	if m.width > 0 {
-		m.profileViewport.Width = m.width - 4 // 减去一些边距
-	}
-
+	// 构建输出
 	var output []string
-
-	// viewport 主内容
 	output = append(output, m.profileViewport.View())
 
-	// 底部滚动指示器
-	var bottomParts []string
-	if !m.profileViewport.AtBottom() {
-		moreIndicator := lipgloss.NewStyle().
-			Foreground(accentColor).
-			Bold(true).
-			Render("▼ 更多内容")
-		bottomParts = append(bottomParts, moreIndicator)
-	}
-
-	if len(bottomParts) > 0 {
-		output = append(output, strings.Join(bottomParts, "  "))
+	if scrollIndicator := m.renderScrollIndicator(); scrollIndicator != "" {
+		output = append(output, scrollIndicator)
 	}
 
 	return strings.Join(output, "\n")
+}
+
+// renderAccountInfo renders account information section.
+func (m *Model) renderAccountInfo() []string {
+	return []string{
+		titleStyle.Render("账户信息"),
+		fmt.Sprintf("  用户名：%s", m.profile.Username),
+		fmt.Sprintf("  邮箱：%s", m.profile.Email),
+	}
+}
+
+// renderBalanceOverview renders balance overview section.
+func (m *Model) renderBalanceOverview() []string {
+	return []string{
+		titleStyle.Render("余额概览"),
+		fmt.Sprintf("  ● 订阅余额：$%.2f", m.profile.SubscriptionBalance),
+		fmt.Sprintf("  ● 按需余额：$%.2f", m.profile.PayAsYouGoBalance),
+		fmt.Sprintf("  ● 总余额：$%.2f", m.profile.Balance),
+		fmt.Sprintf("  ● 余额偏好：%s", describePreference(m.profile.BalancePreference)),
+	}
+}
+
+// renderSubscriptionPlan renders subscription plan details.
+func (m *Model) renderSubscriptionPlan() []string {
+	plan := m.profile.SubscriptionPlan
+	lines := []string{
+		titleStyle.Render("订阅计划"),
+		fmt.Sprintf("  ● 计划：%s ($%.2f)", plan.Name, plan.Price),
+	}
+
+	// 优化截止日期显示
+	if m.profile.SubscriptionExpiry != "" {
+		expiryDate := m.formatDate(m.profile.SubscriptionExpiry)
+		lines = append(lines, fmt.Sprintf("  ● 到期：%s", expiryDate))
+	}
+
+	lines = append(lines, fmt.Sprintf("  ● 每日额度：$%.2f", plan.DailyBalance))
+
+	// 本周消费（带百分比）
+	weekPercent := 0.0
+	if plan.WeeklyLimit > 0 {
+		weekPercent = (m.profile.CurrentWeekSpend / plan.WeeklyLimit) * 100
+	}
+	lines = append(lines, fmt.Sprintf("  ● 本周：$%.2f / $%.2f (%.1f%%)",
+		m.profile.CurrentWeekSpend, plan.WeeklyLimit, weekPercent))
+
+	// 本月消费（带百分比）
+	monthPercent := 0.0
+	if plan.MonthlySpendLimit > 0 {
+		monthPercent = (m.profile.CurrentMonthSpend / plan.MonthlySpendLimit) * 100
+	}
+	lines = append(lines, fmt.Sprintf("  ● 本月：$%.2f / $%.2f (%.1f%%)",
+		m.profile.CurrentMonthSpend, plan.MonthlySpendLimit, monthPercent))
+
+	return lines
+}
+
+// renderSpendingStats renders spending statistics when no subscription plan exists.
+func (m *Model) renderSpendingStats() []string {
+	return []string{
+		titleStyle.Render("消费统计"),
+		fmt.Sprintf("  ● 本周消费：$%.2f", m.profile.CurrentWeekSpend),
+		fmt.Sprintf("  ● 本月消费：$%.2f", m.profile.CurrentMonthSpend),
+	}
+}
+
+// setupProfileViewport configures the viewport with content and dimensions.
+func (m *Model) setupProfileViewport(content string) {
+	m.profileViewport.SetContent(content)
+	m.profileViewport.Height = m.contentHeight()
+	if m.width > 0 {
+		m.profileViewport.Width = m.width - viewportWidthMargin
+	}
+}
+
+// renderScrollIndicator returns a scroll indicator if more content is available.
+func (m *Model) renderScrollIndicator() string {
+	if m.profileViewport.AtBottom() {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(accentColor).
+		Bold(true).
+		Render("▼ 更多内容")
 }
 
 // formatDate 优化日期显示的可读性
@@ -1280,14 +1495,14 @@ func updatePreferenceCmd(client *api.Client, preference string) tea.Cmd {
 	}
 }
 
-func clearStatusAfterDelay(seconds int) tea.Cmd {
-	return tea.Tick(time.Duration(seconds)*time.Second, func(time.Time) tea.Msg {
+func clearStatusAfter(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(time.Time) tea.Msg {
 		return clearStatusMsg{}
 	})
 }
 
 func profileRefreshTicker() tea.Cmd {
-	return tea.Tick(5*time.Second, func(time.Time) tea.Msg {
+	return tea.Tick(profileRefreshInterval, func(time.Time) tea.Msg {
 		return profileRefreshTickMsg{}
 	})
 }
@@ -1306,23 +1521,12 @@ func describePreference(pref string) string {
 	}
 }
 
-func nextPreference(current string) string {
-	switch current {
-	case "subscription_first":
-		return "payg_only"
-	case "payg_only":
-		return "subscription_first"
-	default:
-		return "subscription_first"
-	}
-}
-
 func (m *Model) renderHelpDialog() string {
 	// 样式定义 - 使用主题色
-	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(primaryColor)        // 主蓝色标题
-	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(accentColor)       // 浅蓝色章节标题
-	normalStyle := lipgloss.NewStyle()                                            // 默认文字色
-	hintStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)        // 灰色提示
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(primaryColor)  // 主蓝色标题
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(accentColor) // 浅蓝色章节标题
+	normalStyle := lipgloss.NewStyle()                                     // 默认文字色
+	hintStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)   // 灰色提示
 
 	// 帮助内容
 	helpContent := []string{
@@ -1356,7 +1560,7 @@ func (m *Model) renderHelpDialog() string {
 	// 对话框样式 - 无背景色，主题色边框
 	dialogStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(primaryColor).    // 使用主题蓝色作为边框
+		BorderForeground(primaryColor). // 使用主题蓝色作为边框
 		Padding(2, 3).
 		Width(60).
 		Align(lipgloss.Left)

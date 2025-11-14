@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	defaultBaseURL   = "https://co.yes.vg"
-	defaultTimeout   = 5 * time.Second
-	defaultUserAgent = "yescode-tui/0.1"
+	defaultBaseURL        = "https://co.yes.vg"
+	defaultTimeout        = 5 * time.Second
+	defaultUserAgent      = "yescode-tui/0.1"
+	defaultRequestTimeout = 10 * time.Second
 )
 
 // Client wraps HTTP access to the YesCode API.
@@ -48,7 +49,7 @@ func NewClient(apiKey string, opts ...Option) (*Client, error) {
 	}
 
 	c := &Client{
-		apiKey: apiKey,
+		apiKey:  apiKey,
 		baseURL: defaultBaseURL,
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
@@ -64,33 +65,33 @@ func NewClient(apiKey string, opts ...Option) (*Client, error) {
 
 // Profile aggregates the /auth/profile payload.
 type Profile struct {
-	Email                string   `json:"email"`
-	Username             string   `json:"username"`
-	Balance              float64  `json:"balance"`
-	SubscriptionBalance  float64  `json:"subscription_balance"`
-	PayAsYouGoBalance    float64  `json:"pay_as_you_go_balance"`
-	BalancePreference    string   `json:"balance_preference"`
-	SubscriptionExpiry   string   `json:"subscription_expiry"`
-	CurrentWeekSpend     float64  `json:"current_week_spend"`
-	CurrentMonthSpend    float64  `json:"current_month_spend"`
-	SubscriptionPlan     PlanInfo `json:"subscription_plan"`
+	Email               string   `json:"email"`
+	Username            string   `json:"username"`
+	Balance             float64  `json:"balance"`
+	SubscriptionBalance float64  `json:"subscription_balance"`
+	PayAsYouGoBalance   float64  `json:"pay_as_you_go_balance"`
+	BalancePreference   string   `json:"balance_preference"`
+	SubscriptionExpiry  string   `json:"subscription_expiry"`
+	CurrentWeekSpend    float64  `json:"current_week_spend"`
+	CurrentMonthSpend   float64  `json:"current_month_spend"`
+	SubscriptionPlan    PlanInfo `json:"subscription_plan"`
 }
 
 // PlanInfo details the current subscription plan.
 type PlanInfo struct {
-	Name             string  `json:"name"`
-	Price            float64 `json:"price"`
-	IsActive         bool    `json:"is_active"`
-	DailyBalance     float64 `json:"daily_balance"`
-	WeeklyLimit      float64 `json:"weekly_limit"`
+	Name              string  `json:"name"`
+	Price             float64 `json:"price"`
+	IsActive          bool    `json:"is_active"`
+	DailyBalance      float64 `json:"daily_balance"`
+	WeeklyLimit       float64 `json:"weekly_limit"`
 	MonthlySpendLimit float64 `json:"monthly_spend_limit"`
 }
 
 // ProvidersResponse represents /user/available-providers.
 type ProvidersResponse struct {
-	HasPaygBalance   bool             `json:"has_payg_balance"`
-	HasSubscription  bool             `json:"has_subscription"`
-	Providers        []ProviderBucket `json:"providers"`
+	HasPaygBalance  bool             `json:"has_payg_balance"`
+	HasSubscription bool             `json:"has_subscription"`
+	Providers       []ProviderBucket `json:"providers"`
 }
 
 // ProviderBucket tracks a provider grouping.
@@ -116,24 +117,24 @@ type AlternativeResponse struct {
 
 // AlternativeOption describes one selectable alternative.
 type AlternativeOption struct {
-	IsSelf      bool               `json:"is_self"`
+	IsSelf      bool                `json:"is_self"`
 	Alternative ProviderAlternative `json:"alternative"`
 }
 
 // ProviderAlternative holds display info for an alternative.
 type ProviderAlternative struct {
-	ID            int     `json:"id"`
-	DisplayName   string  `json:"display_name"`
-	Type          string  `json:"type"`
+	ID             int     `json:"id"`
+	DisplayName    string  `json:"display_name"`
+	Type           string  `json:"type"`
 	RateMultiplier float64 `json:"rate_multiplier"`
-	Description   string  `json:"description"`
+	Description    string  `json:"description"`
 }
 
 // ProviderSelection wraps the current or updated selection.
 type ProviderSelection struct {
-	ProviderID           int                 `json:"provider_id"`
-	SelectedAlternativeID int                `json:"selected_alternative_id"`
-	SelectedAlternative  ProviderAlternative `json:"selected_alternative"`
+	ProviderID            int                 `json:"provider_id"`
+	SelectedAlternativeID int                 `json:"selected_alternative_id"`
+	SelectedAlternative   ProviderAlternative `json:"selected_alternative"`
 }
 
 // BalancePreferenceResponse represents updates to balance usage preference.
@@ -168,6 +169,9 @@ type errorPayload struct {
 
 // GetProfile fetches /api/v1/auth/profile.
 func (c *Client) GetProfile(ctx context.Context) (*Profile, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	defer cancel()
+
 	var profile Profile
 	if err := c.get(ctx, "/api/v1/auth/profile", &profile); err != nil {
 		return nil, err
@@ -177,6 +181,9 @@ func (c *Client) GetProfile(ctx context.Context) (*Profile, error) {
 
 // GetAvailableProviders fetches /api/v1/user/available-providers.
 func (c *Client) GetAvailableProviders(ctx context.Context) (*ProvidersResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	defer cancel()
+
 	var resp ProvidersResponse
 	if err := c.get(ctx, "/api/v1/user/available-providers", &resp); err != nil {
 		return nil, err
@@ -186,6 +193,9 @@ func (c *Client) GetAvailableProviders(ctx context.Context) (*ProvidersResponse,
 
 // GetProviderAlternatives fetches /api/v1/user/provider-alternatives/{providerID}.
 func (c *Client) GetProviderAlternatives(ctx context.Context, providerID int) ([]AlternativeOption, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	defer cancel()
+
 	path := fmt.Sprintf("/api/v1/user/provider-alternatives/%d", providerID)
 	var resp AlternativeResponse
 	if err := c.get(ctx, path, &resp); err != nil {
@@ -196,6 +206,9 @@ func (c *Client) GetProviderAlternatives(ctx context.Context, providerID int) ([
 
 // GetProviderSelection fetches /api/v1/user/provider-alternatives/{providerID}/selection.
 func (c *Client) GetProviderSelection(ctx context.Context, providerID int) (*ProviderSelection, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	defer cancel()
+
 	path := fmt.Sprintf("/api/v1/user/provider-alternatives/%d/selection", providerID)
 	var env selectionEnvelope
 	if err := c.get(ctx, path, &env); err != nil {
@@ -206,6 +219,9 @@ func (c *Client) GetProviderSelection(ctx context.Context, providerID int) (*Pro
 
 // SwitchProvider updates the selection for the provider group.
 func (c *Client) SwitchProvider(ctx context.Context, providerID int, alternativeID int) (*ProviderSelection, error) {
+	ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	defer cancel()
+
 	path := fmt.Sprintf("/api/v1/user/provider-alternatives/%d/selection", providerID)
 	payload := map[string]int{"selected_alternative_id": alternativeID}
 	var env selectionEnvelope
@@ -220,6 +236,10 @@ func (c *Client) UpdateBalancePreference(ctx context.Context, preference string)
 	if preference == "" {
 		return nil, errors.New("preference is required")
 	}
+
+	ctx, cancel := context.WithTimeout(ctx, defaultRequestTimeout)
+	defer cancel()
+
 	payload := map[string]string{"balance_preference": preference}
 	var resp BalancePreferenceResponse
 	if err := c.put(ctx, "/api/v1/user/balance-preference", payload, &resp); err != nil {
@@ -245,7 +265,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 }
 
 func (c *Client) put(ctx context.Context, path string, body any, out any) error {
-	var buf io.ReadWriter
+	var buf *bytes.Buffer
 	if body != nil {
 		buf = &bytes.Buffer{}
 		if err := json.NewEncoder(buf).Encode(body); err != nil {
@@ -262,9 +282,6 @@ func (c *Client) put(ctx context.Context, path string, body any, out any) error 
 }
 
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	url := c.baseURL + path
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err != nil {
@@ -292,19 +309,19 @@ func (c *Client) do(req *http.Request, out any) error {
 		apiErr := &APIError{StatusCode: resp.StatusCode, Body: string(bodyBytes)}
 		var payload errorPayload
 		if err := json.Unmarshal(bodyBytes, &payload); err == nil {
-			apiErr.Message = payload.Message
-			if apiErr.Message == "" && payload.Error != "" {
+			if payload.Message != "" {
+				apiErr.Message = payload.Message
+			} else if payload.Error != "" {
 				apiErr.Message = payload.Error
 			}
 		}
 		return apiErr
 	}
 
-	if out == nil || len(bodyBytes) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(bodyBytes, out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+	if out != nil && len(bodyBytes) > 0 {
+		if err := json.Unmarshal(bodyBytes, out); err != nil {
+			return fmt.Errorf("decode response: %w", err)
+		}
 	}
 	return nil
 }
