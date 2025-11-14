@@ -72,26 +72,27 @@ type providerState struct {
 
 // keyMap defines key bindings for the app
 type keyMap struct {
-	Up      key.Binding
-	Down    key.Binding
-	Left    key.Binding
-	Right   key.Binding
-	Tab     key.Binding
-	Enter   key.Binding
-	Refresh key.Binding
-	Tab1    key.Binding
-	Tab2    key.Binding
-	Tab3    key.Binding
-	Quit    key.Binding
+	Up       key.Binding
+	Down     key.Binding
+	Left     key.Binding
+	Right    key.Binding
+	Tab      key.Binding
+	ShiftTab key.Binding
+	Enter    key.Binding
+	Refresh  key.Binding
+	Tab1     key.Binding
+	Tab2     key.Binding
+	Tab3     key.Binding
+	Quit     key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Tab, k.Up, k.Down, k.Left, k.Right, k.Enter, k.Quit}
+	return []key.Binding{k.Up, k.Down, k.Left, k.Right, k.Enter, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Tab, k.Tab1, k.Tab2, k.Tab3},
+		{k.Tab, k.ShiftTab, k.Tab1, k.Tab2, k.Tab3},
 		{k.Up, k.Down, k.Left, k.Right},
 		{k.Enter, k.Refresh, k.Quit},
 	}
@@ -116,7 +117,11 @@ var keys = keyMap{
 	),
 	Tab: key.NewBinding(
 		key.WithKeys("tab"),
-		key.WithHelp("tab", "切换标签页"),
+		key.WithHelp("tab", "下一标签页"),
+	),
+	ShiftTab: key.NewBinding(
+		key.WithKeys("shift+tab"),
+		key.WithHelp("shift+tab", "上一标签页"),
 	),
 	Enter: key.NewBinding(
 		key.WithKeys("enter"),
@@ -418,6 +423,15 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "tab":
 		// Tab 键切换到下一个 tab
 		m.currentTab = (m.currentTab + 1) % 3
+		if m.currentTab == tabProviders {
+			m.focus = focusProviders
+			return m.ensureProvidersLoaded()
+		} else if m.currentTab == tabBalancePreference {
+			m.syncBalancePreferenceIdx()
+		}
+	case "shift+tab":
+		// Shift+Tab 键切换到上一个 tab
+		m.currentTab = (m.currentTab - 1 + 3) % 3
 		if m.currentTab == tabProviders {
 			m.focus = focusProviders
 			return m.ensureProvidersLoaded()
@@ -863,7 +877,7 @@ func (m *Model) renderTabHeader() string {
 
 	// Material Design 风格提示
 	hintStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)
-	hint := hintStyle.Render("  ● 使用数字键 1-3 或 Tab 切换")
+	hint := hintStyle.Render("  ● 切换标签：Tab / Shift+Tab / 数字键")
 
 	return tabsRow + hint
 }
