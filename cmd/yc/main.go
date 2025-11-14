@@ -39,7 +39,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	program := tea.NewProgram(tui.NewModel(client), tea.WithAltScreen())
+	program := tea.NewProgram(
+		tui.NewModel(client),
+		tea.WithAltScreen(),
+		tea.WithMouseCellMotion(), // 启用鼠标支持
+	)
 	if err := program.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "程序运行失败: %v\n", err)
 		os.Exit(1)

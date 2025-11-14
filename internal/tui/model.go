@@ -57,6 +57,7 @@ type Model struct {
 	loadingProviders        bool
 	loadingProfile          bool
 	manualRefreshingProfile bool
+	showHelpDialog          bool
 }
 
 type providerState struct {
@@ -83,6 +84,7 @@ type keyMap struct {
 	Tab1     key.Binding
 	Tab2     key.Binding
 	Tab3     key.Binding
+	Help     key.Binding
 	Quit     key.Binding
 }
 
@@ -142,6 +144,10 @@ var keys = keyMap{
 	Tab3: key.NewBinding(
 		key.WithKeys("3"),
 		key.WithHelp("3", "余额使用偏好"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?", "？"),
+		key.WithHelp("?", "帮助"),
 	),
 	Quit: key.NewBinding(
 		key.WithKeys("esc", "ctrl+c"),
@@ -244,6 +250,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Width = msg.Width
 	case tea.KeyMsg:
 		cmd := m.handleKey(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case tea.MouseMsg:
+		cmd := m.handleMouse(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
@@ -370,7 +381,12 @@ func (m *Model) View() string {
 
 	sections = append(sections, titleStyle.Render("◆ YesCode TUI ◆"))
 
-	sections = append(sections, m.help.View(m.keys))
+	// 简洁的帮助提示
+	helpHintStyle := lipgloss.NewStyle().
+		Foreground(mutedColor).
+		Width(m.width).
+		Align(lipgloss.Center)
+	sections = append(sections, helpHintStyle.Render("支持鼠标操作 · 输入 ? 查看操作帮助"))
 
 	// 添加 tab header
 	sections = append(sections, m.renderTabHeader())
@@ -399,7 +415,16 @@ func (m *Model) View() string {
 	}
 	sections = append(sections, statusStyle.Render(statusText))
 
-	return strings.Join(sections, "\n\n")
+	mainView := strings.Join(sections, "\n\n")
+
+	// 如果帮助对话框打开，只显示对话框，隐藏主页面
+	if m.showHelpDialog {
+		dialog := m.renderHelpDialog()
+		// 将对话框居中放置在全屏空间中
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
+	return mainView
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -410,7 +435,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch msg.String() {
 	case "esc":
+		// 如果帮助对话框打开，关闭它；否则退出程序
+		if m.showHelpDialog {
+			m.showHelpDialog = false
+			return nil
+		}
 		return tea.Quit
+	case "?", "？":
+		// 切换帮助对话框显示状态
+		m.showHelpDialog = !m.showHelpDialog
+		return nil
 	case "1":
 		m.currentTab = tabProfile
 	case "2":
@@ -482,6 +516,149 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		return m.moveSelection(1)
+	}
+	return nil
+}
+
+func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
+	x, y := msg.X, msg.Y
+
+	// 处理滚轮滚动
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		return m.handleMouseWheel(-1)
+	case tea.MouseButtonWheelDown:
+		return m.handleMouseWheel(1)
+	}
+
+	// 只处理左键点击
+	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
+		return nil
+	}
+
+	// sections 使用 "\n\n" 连接，所以每个section之间有空行
+	// Y=0: 标题, Y=1: 空行, Y=2: 帮助, Y=3: 空行, Y=4-6: 标签页（含上下padding）, Y=7: 空行, Y>=8: 内容
+
+	// 点击标签页（Y=4-6，标签页有上下 padding 各 1 行）
+	if y >= 4 && y <= 6 {
+		return m.handleTabClick(x)
+	}
+
+	// 点击内容区域（Y>=8）
+	if y >= 8 {
+		return m.handleContentClick(x, y)
+	}
+
+	return nil
+}
+
+func (m *Model) handleMouseWheel(delta int) tea.Cmd {
+	if m.currentTab == tabProfile {
+		// Profile tab: 滚动 viewport
+		if delta < 0 {
+			m.profileViewport.LineUp(1)
+		} else {
+			m.profileViewport.LineDown(1)
+		}
+		return nil
+	} else if m.currentTab == tabProviders || m.currentTab == tabBalancePreference {
+		// 其他 tab: 上下移动选择
+		return m.moveSelection(delta)
+	}
+	return nil
+}
+
+func (m *Model) handleTabClick(x int) tea.Cmd {
+	// 计算标签页位置（中文字符占2列宽）
+	// "1 用户资料" with padding(0,3) + margin(1) = 17 chars
+	// "2 提供商" with padding(0,3) + margin(1) = 15 chars
+	// "3 余额使用偏好" with padding(0,3) + margin(1) = 21 chars
+
+	// Tab 1: 0-16
+	// Tab 2: 17-31
+	// Tab 3: 32-52
+
+	if x < 17 {
+		// 点击标签1
+		m.currentTab = tabProfile
+	} else if x < 32 {
+		// 点击标签2
+		m.currentTab = tabProviders
+		m.focus = focusProviders
+		return m.ensureProvidersLoaded()
+	} else if x < 53 {
+		// 点击标签3
+		m.currentTab = tabBalancePreference
+		m.syncBalancePreferenceIdx()
+	}
+	return nil
+}
+
+func (m *Model) handleContentClick(x, y int) tea.Cmd {
+	// 内容区从 Y=6 开始
+	contentY := y - 6
+
+	if m.currentTab == tabProviders {
+		return m.handleProvidersClick(x, contentY)
+	} else if m.currentTab == tabBalancePreference {
+		return m.handleBalancePreferenceClick(contentY)
+	}
+	return nil
+}
+
+func (m *Model) handleProvidersClick(x, contentY int) tea.Cmd {
+	if len(m.providers) == 0 {
+		return nil
+	}
+
+	// 简化判断：左右面板以屏幕中心分界
+	// 面板内部有上 padding(1) + 顶部边框(1)，所以列表项从相对位置2开始
+	// contentY 是相对于内容区的偏移，需要考虑面板的内边距
+	listItemY := contentY - 2 // 减去顶部边框(1) + 上padding(1)
+
+	if x < m.width/2 {
+		// 点击左侧提供商列表
+		m.focus = focusProviders
+		if listItemY >= 0 && listItemY < len(m.providers) {
+			m.providerIdx = listItemY
+			return m.queueProviderDetailLoad(m.currentProviderID())
+		}
+	} else {
+		// 点击右侧备选方案列表
+		m.focus = focusAlternatives
+		state := m.ensureProviderState(m.currentProviderID())
+		if state.alternativesLoaded {
+			if listItemY >= 0 && listItemY < len(state.alternatives) {
+				m.altIdx = listItemY
+				// 直接确认切换
+				return m.switchSelection()
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Model) handleBalancePreferenceClick(contentY int) tea.Cmd {
+	// contentY=0: 优先订阅（选项0）
+	// contentY=1-2: 优先订阅的说明文字
+	// contentY=3: 空行
+	// contentY=4: 仅按需付费（选项1）
+	// contentY=5-6: 仅按需付费的说明文字
+
+	var targetIdx int
+	if contentY >= 0 && contentY <= 2 {
+		// 点击了优先订阅区域
+		targetIdx = 0
+	} else if contentY >= 4 && contentY <= 6 {
+		// 点击了仅按需付费区域
+		targetIdx = 1
+	} else {
+		return nil
+	}
+
+	if m.balancePreferenceIdx != targetIdx {
+		m.balancePreferenceIdx = targetIdx
+		return m.toggleBalancePreference()
 	}
 	return nil
 }
@@ -845,8 +1022,8 @@ var (
 	helpStyle         = lipgloss.NewStyle().Foreground(mutedColor)
 	statusStyle       = lipgloss.NewStyle().Foreground(primaryColor)
 	selectedItemStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(0, 3).MarginRight(1)
-	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 3).MarginRight(1)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(1, 3).MarginRight(1)
+	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(1, 3).MarginRight(1)
 )
 
 func (m *Model) renderTabHeader() string {
@@ -875,11 +1052,7 @@ func (m *Model) renderTabHeader() string {
 
 	tabsRow := lipgloss.JoinHorizontal(lipgloss.Top, tabs...)
 
-	// Material Design 风格提示
-	hintStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)
-	hint := hintStyle.Render("  ● 切换标签：Tab / Shift+Tab / 数字键")
-
-	return tabsRow + hint
+	return tabsRow
 }
 
 func (m *Model) renderProfileTab() string {
@@ -1127,4 +1300,51 @@ func nextPreference(current string) string {
 	default:
 		return "subscription_first"
 	}
+}
+
+func (m *Model) renderHelpDialog() string {
+	// 样式定义 - 使用主题色
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(primaryColor)        // 主蓝色标题
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(accentColor)       // 浅蓝色章节标题
+	normalStyle := lipgloss.NewStyle()                                            // 默认文字色
+	hintStyle := lipgloss.NewStyle().Foreground(mutedColor).Italic(true)        // 灰色提示
+
+	// 帮助内容
+	helpContent := []string{
+		titleStyle.Render("操作帮助"),
+		"",
+		sectionStyle.Render("鼠标操作"),
+		normalStyle.Render("  点击标签页        直接切换标签"),
+		normalStyle.Render("  点击列表项        选择提供商或备选方案"),
+		normalStyle.Render("  滚轮滚动         滚动内容或移动选择"),
+		"",
+		sectionStyle.Render("标签页切换"),
+		normalStyle.Render("  Tab / Shift+Tab  前后切换标签页"),
+		normalStyle.Render("  1 / 2 / 3        直接跳转到指定标签页"),
+		"",
+		sectionStyle.Render("导航操作"),
+		normalStyle.Render("  ↑↓ 或 k/j        上下移动"),
+		normalStyle.Render("  ←→ 或 h/l        切换焦点（提供商标签页）"),
+		normalStyle.Render("  Enter           确认选择"),
+		normalStyle.Render("  r               刷新当前视图"),
+		"",
+		sectionStyle.Render("其他"),
+		normalStyle.Render("  ?               显示/隐藏帮助"),
+		normalStyle.Render("  Esc             关闭帮助或退出程序"),
+		normalStyle.Render("  Ctrl+C          退出程序"),
+		"",
+		hintStyle.Render("按 Esc 或 ? 键关闭此帮助"),
+	}
+
+	content := strings.Join(helpContent, "\n")
+
+	// 对话框样式 - 无背景色，主题色边框
+	dialogStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(primaryColor).    // 使用主题蓝色作为边框
+		Padding(2, 3).
+		Width(60).
+		Align(lipgloss.Left)
+
+	return dialogStyle.Render(content)
 }
