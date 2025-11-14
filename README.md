@@ -32,15 +32,17 @@ go install ./cmd/yc
 
 **Bash 用户：**
 ```bash
-echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 **Zsh 用户：**
 ```bash
-echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.zshrc
+echo 'export PATH=$PATH:$HOME/go/bin' >> ~/.zshrc
 source ~/.zshrc
 ```
+
+> **提示**：Go 默认使用 `$HOME/go` 作为 GOPATH。如果你自定义了 GOPATH，请将 `$HOME/go/bin` 替换为 `$(go env GOPATH)/bin`。
 
 配置后重新打开终端，或执行 `source ~/.bashrc` / `source ~/.zshrc` 使配置生效。
 
