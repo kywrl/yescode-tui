@@ -570,23 +570,23 @@ func (m *Model) handleMouseWheel(delta int) tea.Cmd {
 
 func (m *Model) handleTabClick(x int) tea.Cmd {
 	// 计算标签页位置（中文字符占2列宽）
-	// "1. 用户资料" with padding(0,1) + margin(1) = 14 chars
-	// "2. 提供商" with padding(0,1) + margin(1) = 12 chars
-	// "3. 余额使用偏好" with padding(0,1) + margin(1) = 18 chars
+	// "1. 用户资料" with padding(0,2) + margin(1) = 16 chars
+	// "2. 提供商" with padding(0,2) + margin(1) = 14 chars
+	// "3. 余额使用偏好" with padding(0,2) + margin(1) = 20 chars
 
-	// Tab 1: 0-13
-	// Tab 2: 14-25
-	// Tab 3: 26-43
+	// Tab 1: 0-15
+	// Tab 2: 16-29
+	// Tab 3: 30-49
 
-	if x < 14 {
+	if x < 16 {
 		// 点击标签1
 		m.currentTab = tabProfile
-	} else if x < 26 {
+	} else if x < 30 {
 		// 点击标签2
 		m.currentTab = tabProviders
 		m.focus = focusProviders
 		return m.ensureProvidersLoaded()
-	} else if x < 44 {
+	} else if x < 50 {
 		// 点击标签3
 		m.currentTab = tabBalancePreference
 		m.syncBalancePreferenceIdx()
@@ -1022,8 +1022,8 @@ var (
 	helpStyle         = lipgloss.NewStyle().Foreground(mutedColor)
 	statusStyle       = lipgloss.NewStyle().Foreground(primaryColor)
 	selectedItemStyle = lipgloss.NewStyle().Bold(true).Foreground(accentColor)
-	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(0, 1).MarginRight(1)
-	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 1).MarginRight(1)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(primaryColor).Padding(0, 2).MarginRight(1)
+	inactiveTabStyle  = lipgloss.NewStyle().Foreground(mutedColor).Padding(0, 2).MarginRight(1)
 )
 
 func (m *Model) renderTabHeader() string {
