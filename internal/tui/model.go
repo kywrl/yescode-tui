@@ -479,6 +479,8 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 	case "right", "l":
 		if m.currentTab == tabProviders {
 			m.focus = focusAlternatives
+			// 切换到右栏时，同步游标到当前激活项
+			m.syncAltIdx(m.currentProviderID())
 		}
 	case "r":
 		if m.currentTab == tabProfile {
@@ -632,6 +634,9 @@ func (m *Model) handleProvidersClick(x, contentY int) tea.Cmd {
 				m.altIdx = listItemY
 				// 直接确认切换
 				return m.switchSelection()
+			} else {
+				// 点击空白区域，同步游标到当前激活项
+				m.syncAltIdx(m.currentProviderID())
 			}
 		}
 	}
@@ -789,6 +794,12 @@ func (m *Model) queueProviderDetailLoad(providerID int) tea.Cmd {
 	if loading {
 		m.status = fmt.Sprintf("加载提供商 %d 详情中...", providerID)
 	}
+
+	// 如果数据已经加载完成，立即同步游标位置到当前激活项
+	if state.alternativesLoaded && state.selectionLoaded {
+		m.syncAltIdx(providerID)
+	}
+
 	if len(cmds) == 0 {
 		return nil
 	}
