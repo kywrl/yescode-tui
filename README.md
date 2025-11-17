@@ -64,9 +64,12 @@ cd yescode-tui
 go install ./cmd/yc
 ```
 
-### 配置 PATH（首次安装）
+**配置 PATH（仅 go install 方式）：**
 
-如果安装后提示 `yc: command not found`，需要将 Go 的 bin 目录添加到 PATH：
+如果使用 `go install` 安装后提示 `yc: command not found`，需要将 Go 的 bin 目录添加到 PATH：
+
+<details>
+<summary>点击展开配置方法</summary>
 
 **Bash 用户：**
 ```bash
@@ -82,7 +85,7 @@ source ~/.zshrc
 
 > **提示**：Go 默认使用 `$HOME/go` 作为 GOPATH。如果你自定义了 GOPATH，请将 `$HOME/go/bin` 替换为 `$(go env GOPATH)/bin`。
 
-配置后重新打开终端，或执行 `source ~/.bashrc` / `source ~/.zshrc` 使配置生效。
+</details>
 
 ## 快速开始
 
