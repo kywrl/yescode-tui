@@ -11,12 +11,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - TUI Framework: Bubble Tea (Elm-inspired)
 - Styling: Lipgloss
 - Module: yescode-tui
+- Version: 1.0.1 (defined in `internal/tui/model.go` as `Version` constant)
 
 ## Build and Run Commands
 
 ```bash
 # Build the binary
 go build -o yc ./cmd/yc
+
+# Build optimized release binary (smaller size)
+go build -ldflags="-s -w" -o yc ./cmd/yc
 
 # Run directly
 go run ./cmd/yc --api-key YOUR_KEY
@@ -40,6 +44,11 @@ go mod tidy
 go test ./...
 go test -cover ./...
 go test -race ./...
+
+# Cross-compile for different platforms
+GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o yc-linux-amd64 ./cmd/yc
+GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o yc-darwin-arm64 ./cmd/yc
+GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o yc-windows-amd64.exe ./cmd/yc
 ```
 
 ## Architecture
@@ -88,7 +97,8 @@ The codebase follows a clean, layered architecture with three main components:
    - User account info (username, email)
    - Balance details (subscription, pay-as-you-go, total)
    - Subscription plan information
-   - Weekly/monthly spend with percentage indicators
+   - Daily quota with usage percentage
+   - Weekly/monthly spend with percentage indicators (2 decimal places)
    - Scrollable viewport for long content
 
 2. **Providers Tab (Tab 2)**
@@ -334,21 +344,54 @@ On tab load:
 **Main Branch:** `main` (active development)
 **Remote:** `git@github.com:kywrl/yescode-tui.git`
 
-Recent commits focus on UI polish (Material Design, spacing, title adjustments).
+### Release Process
+
+The project uses GitHub Actions for automated releases:
+
+1. **Tag and Push:**
+   ```bash
+   git tag v1.0.x
+   git push origin v1.0.x
+   ```
+
+2. **Automated Build:**
+   - GitHub Actions workflow (`.github/workflows/release.yml`) triggers on tag push
+   - Builds binaries for 5 platforms: Linux (amd64/arm64), macOS (amd64/arm64), Windows (amd64)
+   - Uses optimized build flags: `-ldflags="-s -w"` and `CGO_ENABLED=0`
+   - Creates GitHub Release with all binaries attached
+
+3. **Version Management:**
+   - Update version constant in `internal/tui/model.go` before tagging
+   - Version displays in UI header: `◆ YesCode TUI v1.0.x ◆`
+
+**Release Artifacts:**
+- `yc-linux-amd64`
+- `yc-linux-arm64`
+- `yc-darwin-amd64`
+- `yc-darwin-arm64`
+- `yc-windows-amd64.exe`
 
 ## Performance Considerations
 
-- **Binary Size:** ~10MB (includes debug symbols)
+- **Binary Size:** ~10MB unoptimized, ~7MB with `-ldflags="-s -w"` (strips debug symbols)
 - **HTTP Timeout:** 5 seconds default (prevents hanging on network issues)
 - **Memory:** Minimal - caches provider state in-memory (bounded by provider count)
 - **Concurrency:** API calls run in Bubble Tea goroutines (non-blocking UI)
+
+## UI Layout and Rendering
+
+The application displays version in the title header and uses Material Design styling throughout:
+- Title format: `◆ YesCode TUI v{Version} ◆`
+- Help hint: "支持鼠标操作 · Enter 确认 · Esc 退出 · 输入 ? 查看完整操作帮助"
+- Three-tab navigation with both keyboard and mouse support
+- Daily quota display format: `$used / $total (XX.XX%)`
+- Weekly/monthly spending format: `$spent / $limit (XX.XX%)`
 
 ## Potential Enhancements
 
 - Add comprehensive unit tests
 - Implement logging framework (structured logs)
 - Support custom themes/color schemes
-- Add version flag and semantic versioning
 - Implement client-side rate limiting
 - Export usage reports (CSV/JSON)
 - Add interactive API key setup wizard
