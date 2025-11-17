@@ -42,6 +42,9 @@ const (
 	errorClearDelay        = 3 * time.Second
 )
 
+// Application version
+const Version = "1.0.1"
+
 // UI element positions (calculated relative to View() output)
 type uiLayout struct {
 	titleLineY        int // Title line Y position
@@ -480,7 +483,7 @@ func (m *Model) View() string {
 		Width(m.width).
 		Align(lipgloss.Center)
 
-	sections = append(sections, titleStyle.Render("◆ YesCode TUI ◆"))
+	sections = append(sections, titleStyle.Render(fmt.Sprintf("◆ YesCode TUI v%s ◆", Version)))
 
 	// 简洁的帮助提示
 	helpHintStyle := lipgloss.NewStyle().
