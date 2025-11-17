@@ -100,4 +100,3 @@ func TestColorConstants(t *testing.T) {
 		t.Error("accentColor should not be empty")
 	}
 }
-
