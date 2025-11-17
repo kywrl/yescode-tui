@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"yescode-tui/internal/api"
+	"yescode-tui/internal/version"
 )
 
 type focusArea int
@@ -41,9 +42,6 @@ const (
 	statusClearDelay       = 2 * time.Second
 	errorClearDelay        = 3 * time.Second
 )
-
-// Application version
-const Version = "1.0.1"
 
 // UI element positions (calculated relative to View() output)
 type uiLayout struct {
@@ -483,7 +481,7 @@ func (m *Model) View() string {
 		Width(m.width).
 		Align(lipgloss.Center)
 
-	sections = append(sections, titleStyle.Render(fmt.Sprintf("◆ YesCode TUI v%s ◆", Version)))
+	sections = append(sections, titleStyle.Render(fmt.Sprintf("◆ YesCode TUI v%s ◆", version.Version)))
 
 	// 简洁的帮助提示
 	helpHintStyle := lipgloss.NewStyle().

@@ -9,14 +9,20 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"yescode-tui/internal/version"
 )
 
 const (
 	defaultBaseURL        = "https://co.yes.vg"
 	defaultTimeout        = 5 * time.Second
-	defaultUserAgent      = "yescode-tui/0.1"
 	defaultRequestTimeout = 10 * time.Second
 )
+
+// userAgent returns the User-Agent header value.
+func userAgent() string {
+	return fmt.Sprintf("yescode-tui/%s", version.Version)
+}
 
 // Client wraps HTTP access to the YesCode API.
 type Client struct {
@@ -289,7 +295,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 	}
 	req.Header.Set("X-API-Key", c.apiKey)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", defaultUserAgent)
+	req.Header.Set("User-Agent", userAgent())
 	return req, nil
 }
 
