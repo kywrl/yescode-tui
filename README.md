@@ -12,7 +12,45 @@
 
 ## 安装
 
-### 通过 go install（推荐）
+### 下载预编译二进制文件（最简单）
+
+从 [GitHub Releases](https://github.com/kywrl/yescode-tui/releases) 页面下载对应平台的可执行文件：
+
+**Linux (x86_64):**
+```bash
+wget https://github.com/kywrl/yescode-tui/releases/latest/download/yc-linux-amd64
+chmod +x yc-linux-amd64
+sudo mv yc-linux-amd64 /usr/local/bin/yc
+```
+
+**Linux (ARM64):**
+```bash
+wget https://github.com/kywrl/yescode-tui/releases/latest/download/yc-linux-arm64
+chmod +x yc-linux-arm64
+sudo mv yc-linux-arm64 /usr/local/bin/yc
+```
+
+**macOS (Intel):**
+```bash
+curl -L -o yc-darwin-amd64 https://github.com/kywrl/yescode-tui/releases/latest/download/yc-darwin-amd64
+chmod +x yc-darwin-amd64
+sudo mv yc-darwin-amd64 /usr/local/bin/yc
+```
+
+**macOS (Apple Silicon):**
+```bash
+curl -L -o yc-darwin-arm64 https://github.com/kywrl/yescode-tui/releases/latest/download/yc-darwin-arm64
+chmod +x yc-darwin-arm64
+sudo mv yc-darwin-arm64 /usr/local/bin/yc
+```
+
+**Windows (PowerShell):**
+```powershell
+Invoke-WebRequest -Uri "https://github.com/kywrl/yescode-tui/releases/latest/download/yc-windows-amd64.exe" -OutFile "yc.exe"
+# 将 yc.exe 移动到 PATH 中的目录，例如 C:\Windows\System32
+```
+
+### 通过 go install
 
 ```bash
 go install github.com/kywrl/yescode-tui/cmd/yc@latest
@@ -103,8 +141,8 @@ yc --api-key YOUR_API_KEY --base-url https://custom.api.url
 
 ## 系统要求
 
-- Go 1.24+ （仅构建时需要）
 - 支持 ANSI 颜色的终端
+- Go 1.24+ （仅从源码构建时需要）
 
 ## 许可证
 
