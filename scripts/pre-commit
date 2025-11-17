@@ -1,0 +1,39 @@
+#!/bin/bash
+
+# Git pre-commit hook for Go projects
+# 在提交前自动运行代码检查
+
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# 1. 格式化检查
+echo "📝 Checking code formatting..."
+UNFORMATTED=$(gofmt -l . 2>&1)
+if [ -n "$UNFORMATTED" ]; then
+    echo "❌ The following files are not formatted:"
+    echo "$UNFORMATTED"
+    echo ""
+    echo "💡 Run 'go fmt ./...' to fix formatting issues"
+    exit 1
+fi
+echo "✅ Code formatting check passed"
+
+# 2. 静态分析
+echo "🔬 Running go vet..."
+if ! go vet ./... 2>&1; then
+    echo "❌ go vet found issues"
+    exit 1
+fi
+echo "✅ go vet passed"
+
+# 3. 运行测试
+echo "🧪 Running tests..."
+if ! go test -race -short ./... 2>&1; then
+    echo "❌ Tests failed"
+    exit 1
+fi
+echo "✅ All tests passed"
+
+echo ""
+echo "✨ All pre-commit checks passed! Ready to commit."
