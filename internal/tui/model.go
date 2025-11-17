@@ -1324,14 +1324,20 @@ func (m *Model) renderSubscriptionPlan() []string {
 		lines = append(lines, fmt.Sprintf("  ● 到期：%s", expiryDate))
 	}
 
-	lines = append(lines, fmt.Sprintf("  ● 每日额度：$%.2f", plan.DailyBalance))
+	// 每日额度（带使用进度百分比）
+	dailyUsed := plan.DailyBalance - m.profile.SubscriptionBalance
+	dailyUsagePercent := 0.0
+	if plan.DailyBalance > 0 {
+		dailyUsagePercent = (dailyUsed / plan.DailyBalance) * 100
+	}
+	lines = append(lines, fmt.Sprintf("  ● 每日额度：$%.2f / $%.2f (%.2f%%)", dailyUsed, plan.DailyBalance, dailyUsagePercent))
 
 	// 本周消费（带百分比）
 	weekPercent := 0.0
 	if plan.WeeklyLimit > 0 {
 		weekPercent = (m.profile.CurrentWeekSpend / plan.WeeklyLimit) * 100
 	}
-	lines = append(lines, fmt.Sprintf("  ● 本周：$%.2f / $%.2f (%.1f%%)",
+	lines = append(lines, fmt.Sprintf("  ● 本周：$%.2f / $%.2f (%.2f%%)",
 		m.profile.CurrentWeekSpend, plan.WeeklyLimit, weekPercent))
 
 	// 本月消费（带百分比）
@@ -1339,7 +1345,7 @@ func (m *Model) renderSubscriptionPlan() []string {
 	if plan.MonthlySpendLimit > 0 {
 		monthPercent = (m.profile.CurrentMonthSpend / plan.MonthlySpendLimit) * 100
 	}
-	lines = append(lines, fmt.Sprintf("  ● 本月：$%.2f / $%.2f (%.1f%%)",
+	lines = append(lines, fmt.Sprintf("  ● 本月：$%.2f / $%.2f (%.2f%%)",
 		m.profile.CurrentMonthSpend, plan.MonthlySpendLimit, monthPercent))
 
 	return lines
