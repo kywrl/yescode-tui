@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"time"
 
+	"yescode-tui/internal/logger"
 	"yescode-tui/internal/version"
 )
 
@@ -97,37 +98,53 @@ type PlanInfo struct {
 type ProvidersResponse struct {
 	HasPaygBalance  bool             `json:"has_payg_balance"`
 	HasSubscription bool             `json:"has_subscription"`
+	IsTeamMember    bool             `json:"is_team_member"`
 	Providers       []ProviderBucket `json:"providers"`
 }
 
-// ProviderBucket tracks a provider grouping.
+// ProviderBucket tracks a provider grouping with its alternatives.
 type ProviderBucket struct {
-	Provider       ProviderInfo `json:"provider"`
-	RateMultiplier float64      `json:"rate_multiplier"`
-	IsDefault      bool         `json:"is_default"`
-	Source         string       `json:"source"`
+	Provider              ProviderInfo         `json:"provider"`
+	RateMultiplier        float64              `json:"rate_multiplier"`
+	IsDefault             bool                 `json:"is_default"`
+	Source                string               `json:"source"`
+	Alternatives          []AlternativeMapping `json:"alternatives"`
+	SelectedAlternativeID int                  `json:"selected_alternative_id"`
 }
 
 // ProviderInfo contains metadata about a provider group.
 type ProviderInfo struct {
-	ID          int    `json:"id"`
-	DisplayName string `json:"display_name"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
+	ID            int      `json:"id"`
+	DisplayName   string   `json:"display_name"`
+	Type          string   `json:"type"`
+	Description   string   `json:"description"`
+	AllowedModels []string `json:"allowed_models"`
 }
 
-// AlternativeResponse is returned by provider-alternatives endpoints.
+// AlternativeMapping represents a provider alternative mapping.
+type AlternativeMapping struct {
+	ID             int          `json:"id"`
+	ProviderID     int          `json:"provider_id"`
+	AlternativeID  int          `json:"alternative_id"`
+	Alternative    ProviderInfo `json:"alternative"`
+	DisplayName    string       `json:"display_name"`
+	Priority       int          `json:"priority"`
+	IsSelf         bool         `json:"is_self"`
+	RateMultiplier float64      `json:"rate_multiplier"`
+}
+
+// AlternativeResponse is returned by provider-alternatives endpoints (deprecated).
 type AlternativeResponse struct {
 	Data []AlternativeOption `json:"data"`
 }
 
-// AlternativeOption describes one selectable alternative.
+// AlternativeOption describes one selectable alternative (deprecated).
 type AlternativeOption struct {
 	IsSelf      bool                `json:"is_self"`
 	Alternative ProviderAlternative `json:"alternative"`
 }
 
-// ProviderAlternative holds display info for an alternative.
+// ProviderAlternative holds display info for an alternative (deprecated).
 type ProviderAlternative struct {
 	ID             int     `json:"id"`
 	DisplayName    string  `json:"display_name"`
@@ -261,29 +278,51 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 		if err != nil {
 			return err
 		}
+
+		// 记录GET请求
+		logger.Debug("→ GET %s", req.URL.String())
+
 		err = c.do(req, out)
 		if err == nil {
 			return nil
 		}
 		lastErr = err
+		if attempt < 1 {
+			logger.Debug("Request failed, retrying... (attempt %d/2)", attempt+1)
+		}
 	}
 	return lastErr
 }
 
 func (c *Client) put(ctx context.Context, path string, body any, out any) error {
 	var buf *bytes.Buffer
+	var bodyJSON []byte
 	if body != nil {
 		buf = &bytes.Buffer{}
 		if err := json.NewEncoder(buf).Encode(body); err != nil {
 			return fmt.Errorf("encode body: %w", err)
 		}
+		bodyJSON = buf.Bytes()
 	}
 
-	req, err := c.newRequest(ctx, http.MethodPut, path, buf)
+	// 重新创建 buffer（因为上面的 Encode 已经消费了）
+	var bodyReader io.Reader
+	if bodyJSON != nil {
+		bodyReader = bytes.NewReader(bodyJSON)
+	}
+
+	req, err := c.newRequest(ctx, http.MethodPut, path, bodyReader)
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+
+	// 记录PUT请求
+	logger.Debug("→ PUT %s", req.URL.String())
+	if bodyJSON != nil {
+		logger.Debug("  Request Body: %s", string(bodyJSON))
+	}
+
 	return c.do(req, out)
 }
 
@@ -302,13 +341,27 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 func (c *Client) do(req *http.Request, out any) error {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		logger.Error("HTTP request failed: %v", err)
 		return err
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
+		logger.Error("Failed to read response body: %v", err)
 		return err
+	}
+
+	// 记录响应信息
+	logger.Debug("← Status: %d", resp.StatusCode)
+	if len(bodyBytes) > 0 {
+		// 格式化 JSON 输出（如果是有效的 JSON）
+		var prettyJSON bytes.Buffer
+		if err := json.Indent(&prettyJSON, bodyBytes, "", "  "); err == nil {
+			logger.Debug("  Response Body:\n%s", prettyJSON.String())
+		} else {
+			logger.Debug("  Response Body: %s", string(bodyBytes))
+		}
 	}
 
 	if resp.StatusCode >= 300 {
@@ -321,11 +374,13 @@ func (c *Client) do(req *http.Request, out any) error {
 				apiErr.Message = payload.Error
 			}
 		}
+		logger.Error("API Error: %v", apiErr)
 		return apiErr
 	}
 
 	if out != nil && len(bodyBytes) > 0 {
 		if err := json.Unmarshal(bodyBytes, out); err != nil {
+			logger.Error("Failed to decode response: %v", err)
 			return fmt.Errorf("decode response: %w", err)
 		}
 	}

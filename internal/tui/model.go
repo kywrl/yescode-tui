@@ -71,6 +71,9 @@ type Model struct {
 
 	profile                 *api.Profile
 	providers               []api.ProviderBucket
+	hasPaygBalance          bool
+	hasSubscription         bool
+	isTeamMember            bool
 	providerIdx             int
 	altIdx                  int
 	balancePreferenceIdx    int
@@ -95,14 +98,8 @@ type Model struct {
 }
 
 type providerState struct {
-	alternatives        []api.AlternativeOption
-	selection           *api.ProviderSelection
-	alternativesLoaded  bool
-	selectionLoaded     bool
-	loadingAlternatives bool
-	loadingSelection    bool
-	switching           bool
-	lastError           error
+	switching bool
+	lastError error
 }
 
 // keyMap defines key bindings for the app
@@ -197,16 +194,6 @@ type providersLoadedMsg struct {
 	response *api.ProvidersResponse
 }
 
-type alternativesLoadedMsg struct {
-	providerID   int
-	alternatives []api.AlternativeOption
-}
-
-type selectionLoadedMsg struct {
-	providerID int
-	selection  *api.ProviderSelection
-}
-
 type switchCompletedMsg struct {
 	providerID int
 	selection  *api.ProviderSelection
@@ -294,10 +281,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.handleProfileRefreshTick()...)
 	case providersLoadedMsg:
 		cmds = append(cmds, m.handleProvidersLoaded(msg)...)
-	case alternativesLoadedMsg:
-		m.handleAlternativesLoaded(msg)
-	case selectionLoadedMsg:
-		m.handleSelectionLoaded(msg)
 	case switchCompletedMsg:
 		cmds = append(cmds, m.handleSwitchCompleted(msg)...)
 	case preferenceUpdatedMsg:
@@ -351,6 +334,9 @@ func (m *Model) handleProfileRefreshTick() []tea.Cmd {
 func (m *Model) handleProvidersLoaded(msg providersLoadedMsg) []tea.Cmd {
 	var cmds []tea.Cmd
 	m.providers = msg.response.Providers
+	m.hasPaygBalance = msg.response.HasPaygBalance
+	m.hasSubscription = msg.response.HasSubscription
+	m.isTeamMember = msg.response.IsTeamMember
 	m.providersLoaded = true
 	m.loadingProviders = false
 
@@ -369,43 +355,20 @@ func (m *Model) handleProvidersLoaded(msg providersLoadedMsg) []tea.Cmd {
 	return cmds
 }
 
-// handleAlternativesLoaded processes alternatives load.
-func (m *Model) handleAlternativesLoaded(msg alternativesLoadedMsg) {
-	state := m.ensureProviderState(msg.providerID)
-	state.alternatives = msg.alternatives
-	state.alternativesLoaded = true
-	state.loadingAlternatives = false
-	state.lastError = nil
-	m.syncAltIdx(msg.providerID)
-
-	// 检查是否所有加载都完成，立即清除加载状态消息
-	if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
-		m.status = ""
-	}
-}
-
-// handleSelectionLoaded processes selection load.
-func (m *Model) handleSelectionLoaded(msg selectionLoadedMsg) {
-	state := m.ensureProviderState(msg.providerID)
-	state.selection = msg.selection
-	state.selectionLoaded = true
-	state.loadingSelection = false
-	state.lastError = nil
-	m.syncAltIdx(msg.providerID)
-
-	// 检查是否所有加载都完成，立即清除加载状态消息
-	if state.alternativesLoaded && state.selectionLoaded && strings.Contains(m.status, "加载提供商") {
-		m.status = ""
-	}
-}
-
 // handleSwitchCompleted processes provider switch completion.
 func (m *Model) handleSwitchCompleted(msg switchCompletedMsg) []tea.Cmd {
 	state := m.ensureProviderState(msg.providerID)
-	state.selection = msg.selection
-	state.selectionLoaded = true
 	state.switching = false
 	state.lastError = nil
+
+	// 更新 ProviderBucket 中的 selected_alternative_id
+	for i := range m.providers {
+		if m.providers[i].Provider.ID == msg.providerID {
+			m.providers[i].SelectedAlternativeID = msg.selection.SelectedAlternativeID
+			break
+		}
+	}
+
 	m.syncAltIdx(msg.providerID)
 	m.status = fmt.Sprintf("已切换到 %s", msg.selection.SelectedAlternative.DisplayName)
 	return []tea.Cmd{clearStatusAfter(statusClearDelay)}
@@ -433,12 +396,7 @@ func (m *Model) handlePreferenceFailed(msg preferenceFailedMsg) []tea.Cmd {
 // handleProviderLoadFailed processes provider load failures.
 func (m *Model) handleProviderLoadFailed(msg providerLoadFailedMsg) []tea.Cmd {
 	state := m.ensureProviderState(msg.providerID)
-	switch msg.target {
-	case "alternatives":
-		state.loadingAlternatives = false
-	case "selection":
-		state.loadingSelection = false
-	case "switch":
+	if msg.target == "switch" {
 		state.switching = false
 	}
 	state.lastError = msg.err
@@ -818,9 +776,9 @@ func (m *Model) handleProvidersClick(x, contentY int) tea.Cmd {
 	} else {
 		// 点击右侧备选方案列表
 		m.focus = focusAlternatives
-		state := m.ensureProviderState(m.currentProviderID())
-		if state.alternativesLoaded {
-			if listItemY >= 0 && listItemY < len(state.alternatives) {
+		bucket := m.getCurrentProviderBucket()
+		if bucket != nil && len(bucket.Alternatives) > 0 {
+			if listItemY >= 0 && listItemY < len(bucket.Alternatives) {
 				m.altIdx = listItemY
 				// 直接确认切换
 				return m.switchSelection()
@@ -882,11 +840,11 @@ func (m *Model) moveSelection(delta int) tea.Cmd {
 		m.syncAltIdx(m.currentProviderID())
 		return m.queueProviderDetailLoad(m.currentProviderID())
 	} else {
-		state := m.ensureProviderState(m.currentProviderID())
-		if len(state.alternatives) == 0 {
+		bucket := m.getCurrentProviderBucket()
+		if bucket == nil || len(bucket.Alternatives) == 0 {
 			return nil
 		}
-		m.altIdx = clampIndex(m.altIdx+delta, len(state.alternatives))
+		m.altIdx = clampIndex(m.altIdx+delta, len(bucket.Alternatives))
 	}
 	return nil
 }
@@ -901,34 +859,36 @@ func (m *Model) refreshCurrentProvider() tea.Cmd {
 	if len(m.providers) == 0 {
 		return nil
 	}
-	state := m.ensureProviderState(m.currentProviderID())
-	state.alternativesLoaded = false
-	state.loadingAlternatives = false
-	state.selectionLoaded = false
-	state.loadingSelection = false
-	return m.queueProviderDetailLoad(m.currentProviderID())
+	// 刷新 providers 列表以获取最新数据
+	return loadProvidersCmd(m.client)
 }
 
 func (m *Model) switchSelection() tea.Cmd {
 	if len(m.providers) == 0 {
 		return nil
 	}
+	bucket := m.getCurrentProviderBucket()
+	if bucket == nil || len(bucket.Alternatives) == 0 {
+		return nil
+	}
+	if m.altIdx >= len(bucket.Alternatives) {
+		return nil
+	}
+
 	state := m.ensureProviderState(m.currentProviderID())
-	if state.switching || state.loadingAlternatives || len(state.alternatives) == 0 {
+	if state.switching {
 		return nil
 	}
-	if m.altIdx >= len(state.alternatives) {
-		return nil
-	}
-	target := state.alternatives[m.altIdx].Alternative
-	if state.selection != nil && state.selection.SelectedAlternativeID == target.ID {
+
+	target := bucket.Alternatives[m.altIdx]
+	if bucket.SelectedAlternativeID == target.AlternativeID {
 		m.status = fmt.Sprintf("已在使用 %s", target.DisplayName)
 		return nil
 	}
 
 	state.switching = true
 	m.status = fmt.Sprintf("切换到 %s 中...", target.DisplayName)
-	return switchProviderCmd(m.client, m.currentProviderID(), target.ID)
+	return switchProviderCmd(m.client, bucket.Provider.ID, target.AlternativeID)
 }
 
 func (m *Model) toggleBalancePreference() tea.Cmd {
@@ -972,59 +932,48 @@ func (m *Model) queueProviderDetailLoad(providerID int) tea.Cmd {
 	if providerID == 0 {
 		return nil
 	}
-	state := m.ensureProviderState(providerID)
-	var cmds []tea.Cmd
-	var loading bool
-	if !state.alternativesLoaded && !state.loadingAlternatives {
-		state.loadingAlternatives = true
-		cmds = append(cmds, loadAlternativesCmd(m.client, providerID))
-		loading = true
-	}
-	if !state.selectionLoaded && !state.loadingSelection {
-		state.loadingSelection = true
-		cmds = append(cmds, loadSelectionCmd(m.client, providerID))
-		loading = true
-	}
-	if loading {
-		m.status = fmt.Sprintf("加载提供商 %d 详情中...", providerID)
-	}
-
-	// 如果数据已经加载完成，立即同步游标位置到当前激活项
-	if state.alternativesLoaded && state.selectionLoaded {
-		m.syncAltIdx(providerID)
-	}
-
-	if len(cmds) == 0 {
-		return nil
-	}
-	return tea.Batch(cmds...)
+	// 数据已经在 providers 中，直接同步游标位置
+	m.syncAltIdx(providerID)
+	return nil
 }
 
 func (m *Model) syncAltIdx(providerID int) {
 	if providerID == 0 || providerID != m.currentProviderID() {
 		return
 	}
-	state := m.ensureProviderState(providerID)
-	if state.selection != nil && len(state.alternatives) > 0 {
-		if idx := m.findAlternativeIndex(state.alternatives, state.selection.SelectedAlternativeID); idx >= 0 {
+	bucket := m.getCurrentProviderBucket()
+	if bucket == nil {
+		m.altIdx = 0
+		return
+	}
+
+	if bucket.SelectedAlternativeID > 0 && len(bucket.Alternatives) > 0 {
+		if idx := m.findAlternativeIndex(bucket.Alternatives, bucket.SelectedAlternativeID); idx >= 0 {
 			m.altIdx = idx
 			return
 		}
 	}
-	if len(state.alternatives) == 0 {
+	if len(bucket.Alternatives) == 0 {
 		m.altIdx = 0
 		return
 	}
-	m.altIdx = clampIndex(m.altIdx, len(state.alternatives))
+	m.altIdx = clampIndex(m.altIdx, len(bucket.Alternatives))
 }
 
-func (m *Model) findAlternativeIndex(alts []api.AlternativeOption, id int) int {
+func (m *Model) findAlternativeIndex(alts []api.AlternativeMapping, id int) int {
 	for i, alt := range alts {
-		if alt.Alternative.ID == id {
+		if alt.AlternativeID == id {
 			return i
 		}
 	}
 	return -1
+}
+
+func (m *Model) getCurrentProviderBucket() *api.ProviderBucket {
+	if len(m.providers) == 0 || m.providerIdx < 0 || m.providerIdx >= len(m.providers) {
+		return nil
+	}
+	return &m.providers[m.providerIdx]
 }
 
 func (m *Model) currentProviderID() int {
@@ -1062,13 +1011,25 @@ func (m *Model) contentHeight() int {
 }
 
 func (m *Model) renderPanels() string {
+	var content string
+
+	// 渲染账户状态信息（显示在面板上方）
+	if m.providersLoaded {
+		statusLine := m.renderAccountStatus()
+		statusStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#999")).
+			Padding(0, 1)
+		content = statusStyle.Render(statusLine) + "\n\n"
+	}
+
+	// 渲染左右两个面板
 	left := m.renderProvidersPanel()
 	right := m.renderAlternativesPanel()
 
 	// 水平拼接左右两个面板
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	return panels
+	return content + panels
 }
 
 func (m *Model) renderProvidersPanel() string {
@@ -1104,39 +1065,73 @@ func (m *Model) renderProvidersPanel() string {
 	return style.Width(m.panelWidth()).Height(defaultPanelHeight).Render(content)
 }
 
+func (m *Model) renderAccountStatus() string {
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CCCCCC"))
+	validStyle := lipgloss.NewStyle().Foreground(successColor).Bold(true)
+	invalidStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#999")).Bold(true)
+	separatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#999"))
+
+	formatStatus := func(label string, isValid bool) string {
+		statusText := "无效"
+		style := invalidStyle
+		if isValid {
+			statusText = "有效"
+			style = validStyle
+		}
+		return fmt.Sprintf("%s: %s", labelStyle.Render(label), style.Render(statusText))
+	}
+
+	parts := []string{
+		formatStatus("订阅计划", m.hasSubscription),
+		formatStatus("按需", m.hasPaygBalance),
+		formatStatus("团队", m.isTeamMember),
+	}
+
+	// 使用灰色分隔符
+	separator := separatorStyle.Render(" │ ")
+	return strings.Join(parts, separator)
+}
+
 func (m *Model) renderAlternativesPanel() string {
 	var lines []string
 
 	if len(m.providers) == 0 {
 		lines = append(lines, "请先选择提供商")
 	} else {
+		bucket := m.getCurrentProviderBucket()
 		state := m.ensureProviderState(m.currentProviderID())
 
 		switch {
-		case state.loadingAlternatives:
-			lines = append(lines, fmt.Sprintf("加载中... %s", m.spinner.View()))
 		case state.lastError != nil:
 			errorStyle := lipgloss.NewStyle().Foreground(errorColor)
 			lines = append(lines, errorStyle.Render(fmt.Sprintf("⚠ 错误：%v", state.lastError)))
 			lines = append(lines, "")
 			lines = append(lines, "按 r 键重试")
-		case len(state.alternatives) == 0:
+		case bucket == nil || len(bucket.Alternatives) == 0:
 			lines = append(lines, "无可切换方案")
 		default:
-			for i, alt := range state.alternatives {
+			grayStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#999"))
+
+			for i, alt := range bucket.Alternatives {
 				prefix := "  "
 				if i == m.altIdx {
 					prefix = "▶ "
 				}
 
 				// 检查是否为当前选中项
-				isCurrentSelection := state.selection != nil && state.selection.SelectedAlternativeID == alt.Alternative.ID
+				isCurrentSelection := bucket.SelectedAlternativeID == alt.AlternativeID
+
+				// 构建名称（添加主要标记）
+				displayName := alt.DisplayName
+				if alt.IsSelf {
+					displayName += " [主要]"
+				}
 
 				// 构建行内容
 				lineText := fmt.Sprintf("%s%s ×%.2f",
 					prefix,
-					alt.Alternative.DisplayName,
-					alt.Alternative.RateMultiplier,
+					displayName,
+					alt.RateMultiplier,
 				)
 
 				// 如果是当前选中项，添加标记
@@ -1146,6 +1141,12 @@ func (m *Model) renderAlternativesPanel() string {
 				}
 
 				lines = append(lines, lineText)
+
+				// 模型列表行（灰色，逗号分隔）
+				if len(alt.Alternative.AllowedModels) > 0 {
+					modelsLine := "    " + strings.Join(alt.Alternative.AllowedModels, ", ")
+					lines = append(lines, grayStyle.Render(modelsLine))
+				}
 			}
 		}
 	}
@@ -1459,26 +1460,6 @@ func loadProvidersCmd(client *api.Client) tea.Cmd {
 			return errMsg{err: err}
 		}
 		return providersLoadedMsg{response: resp}
-	}
-}
-
-func loadAlternativesCmd(client *api.Client, providerID int) tea.Cmd {
-	return func() tea.Msg {
-		alts, err := client.GetProviderAlternatives(context.Background(), providerID)
-		if err != nil {
-			return providerLoadFailedMsg{providerID: providerID, target: "alternatives", err: err}
-		}
-		return alternativesLoadedMsg{providerID: providerID, alternatives: alts}
-	}
-}
-
-func loadSelectionCmd(client *api.Client, providerID int) tea.Cmd {
-	return func() tea.Msg {
-		selection, err := client.GetProviderSelection(context.Background(), providerID)
-		if err != nil {
-			return providerLoadFailedMsg{providerID: providerID, target: "selection", err: err}
-		}
-		return selectionLoadedMsg{providerID: providerID, selection: selection}
 	}
 }
 
