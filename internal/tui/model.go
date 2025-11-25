@@ -38,7 +38,7 @@ const (
 	defaultPanelHeight     = 10
 	minPanelWidth          = 30
 	viewportWidthMargin    = 4
-	profileRefreshInterval = 5 * time.Second
+	profileRefreshInterval = 30 * time.Second
 	statusClearDelay       = 2 * time.Second
 	errorClearDelay        = 3 * time.Second
 )
@@ -672,11 +672,24 @@ func (m *Model) handleNavigation(key string) tea.Cmd {
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	x, y := msg.X, msg.Y
 
+	layout := getUILayout()
+
+	// 鼠标悬浮时在提供商标签页自动聚焦左右栏
+	if msg.Action == tea.MouseActionMotion && m.currentTab == tabProviders && y >= layout.contentStartY {
+		return m.handleProvidersHover(x)
+	}
+
 	// 处理滚轮滚动
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
+		if m.currentTab == tabProviders && y >= layout.contentStartY {
+			m.updateProvidersFocus(m.providersFocusByX(x))
+		}
 		return m.handleMouseWheel(-1)
 	case tea.MouseButtonWheelDown:
+		if m.currentTab == tabProviders && y >= layout.contentStartY {
+			m.updateProvidersFocus(m.providersFocusByX(x))
+		}
 		return m.handleMouseWheel(1)
 	}
 
@@ -684,8 +697,6 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionPress {
 		return nil
 	}
-
-	layout := getUILayout()
 
 	// 点击标签页
 	if y == layout.tabHeaderY {
@@ -757,38 +768,42 @@ func (m *Model) handleContentClick(x, y int) tea.Cmd {
 }
 
 func (m *Model) handleProvidersClick(x, contentY int) tea.Cmd {
+	_ = contentY
+
 	if len(m.providers) == 0 {
 		return nil
 	}
 
-	layout := getUILayout()
-	// 面板内部列表项的 Y 位置需要减去面板的边框和内边距
-	listItemY := contentY - layout.panelInnerOffsetY
-
-	// 左右面板以屏幕中心分界
-	if x < m.width/2 {
-		// 点击左侧提供商列表
-		m.focus = focusProviders
-		if listItemY >= 0 && listItemY < len(m.providers) {
-			m.providerIdx = listItemY
-			return m.queueProviderDetailLoad(m.currentProviderID())
-		}
-	} else {
-		// 点击右侧备选方案列表
-		m.focus = focusAlternatives
-		bucket := m.getCurrentProviderBucket()
-		if bucket != nil && len(bucket.Alternatives) > 0 {
-			if listItemY >= 0 && listItemY < len(bucket.Alternatives) {
-				m.altIdx = listItemY
-				// 直接确认切换
-				return m.switchSelection()
-			} else {
-				// 点击空白区域，同步游标到当前激活项
-				m.syncAltIdx(m.currentProviderID())
-			}
-		}
-	}
+	targetFocus := m.providersFocusByX(x)
+	m.updateProvidersFocus(targetFocus)
 	return nil
+}
+
+func (m *Model) handleProvidersHover(x int) tea.Cmd {
+	targetFocus := m.providersFocusByX(x)
+	m.updateProvidersFocus(targetFocus)
+	return nil
+}
+
+func (m *Model) providersFocusByX(x int) focusArea {
+	if x < m.panelWidth() {
+		return focusProviders
+	}
+	return focusAlternatives
+}
+
+func (m *Model) updateProvidersFocus(target focusArea) {
+	if target == m.focus {
+		return
+	}
+	if len(m.providers) == 0 {
+		m.focus = target
+		return
+	}
+	m.focus = target
+	if target == focusAlternatives {
+		m.syncAltIdx(m.currentProviderID())
+	}
 }
 
 func (m *Model) handleBalancePreferenceClick(contentY int) tea.Cmd {
@@ -1029,7 +1044,16 @@ func (m *Model) renderPanels() string {
 	// 水平拼接左右两个面板
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 
-	return content + panels
+	guidance := ""
+	if m.currentTab == tabProviders {
+		leftWidth := lipgloss.Width(left)
+		guidanceStyle := lipgloss.NewStyle().
+			PaddingLeft(leftWidth + 1).
+			Foreground(lipgloss.Color("#999"))
+		guidance = "\n" + guidanceStyle.Render("Enter 键确认切换 · 鼠标滚轮/↑↓键 选择")
+	}
+
+	return content + panels + guidance
 }
 
 func (m *Model) renderProvidersPanel() string {
@@ -1333,8 +1357,8 @@ func (m *Model) renderSubscriptionPlan() []string {
 		dailyUsagePercent = (dailyUsed / plan.DailyBalance) * 100
 	}
 	dailyRemaining := m.profile.SubscriptionBalance
-	lines = append(lines, fmt.Sprintf("  ● 今日：$%.2f / $%.2f (%.2f%%) / $%.2f",
-		plan.DailyBalance, dailyUsed, dailyUsagePercent, dailyRemaining))
+	lines = append(lines, fmt.Sprintf("  ● 今日：$%.2f（%.2f%%）| $%.2f | $%.2f",
+		dailyUsed, dailyUsagePercent, dailyRemaining, plan.DailyBalance))
 
 	// 本周消费（格式：限制 / 已消费 (百分比) / 剩余额度）
 	weekPercent := 0.0
@@ -1342,8 +1366,8 @@ func (m *Model) renderSubscriptionPlan() []string {
 		weekPercent = (m.profile.CurrentWeekSpend / plan.WeeklyLimit) * 100
 	}
 	weekRemaining := plan.WeeklyLimit - m.profile.CurrentWeekSpend
-	lines = append(lines, fmt.Sprintf("  ● 本周：$%.2f / $%.2f (%.2f%%) / $%.2f",
-		plan.WeeklyLimit, m.profile.CurrentWeekSpend, weekPercent, weekRemaining))
+	lines = append(lines, fmt.Sprintf("  ● 本周：$%.2f（%.2f%%）| $%.2f | $%.2f",
+		m.profile.CurrentWeekSpend, weekPercent, weekRemaining, plan.WeeklyLimit))
 
 	// 本月消费（格式：限制 / 已消费 (百分比) / 剩余额度）
 	monthPercent := 0.0
@@ -1351,8 +1375,8 @@ func (m *Model) renderSubscriptionPlan() []string {
 		monthPercent = (m.profile.CurrentMonthSpend / plan.MonthlySpendLimit) * 100
 	}
 	monthRemaining := plan.MonthlySpendLimit - m.profile.CurrentMonthSpend
-	lines = append(lines, fmt.Sprintf("  ● 本月：$%.2f / $%.2f (%.2f%%) / $%.2f",
-		plan.MonthlySpendLimit, m.profile.CurrentMonthSpend, monthPercent, monthRemaining))
+	lines = append(lines, fmt.Sprintf("  ● 本月：$%.2f（%.2f%%）| $%.2f | $%.2f",
+		m.profile.CurrentMonthSpend, monthPercent, monthRemaining, plan.MonthlySpendLimit))
 
 	return lines
 }
@@ -1526,7 +1550,7 @@ func (m *Model) renderHelpDialog() string {
 		"",
 		sectionStyle.Render("鼠标操作"),
 		normalStyle.Render("  点击标签页        直接切换标签"),
-		normalStyle.Render("  点击列表项        选择提供商或备选方案"),
+		normalStyle.Render("  悬浮/点击左右栏    聚焦对应列表"),
 		normalStyle.Render("  滚轮滚动         滚动内容或移动选择"),
 		"",
 		sectionStyle.Render("标签页切换"),

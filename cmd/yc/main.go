@@ -56,7 +56,7 @@ func main() {
 	program := tea.NewProgram(
 		tui.NewModel(client),
 		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(), // 启用鼠标支持
+		tea.WithMouseAllMotion(), // 启用鼠标支持（含悬浮）
 	)
 	logger.Info("Starting Bubble Tea program")
 	if err := program.Start(); err != nil {
